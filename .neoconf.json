@@ -1,0 +1,11 @@
+{
+  "lspconfig": {
+    "basedpyright": {
+      "basedpyright.analysis.include": [
+        "scripts/**",
+        "model/**"
+      ],
+      "basedpyright.analysis.typeCheckingMode": "off"
+    }
+  }
+}

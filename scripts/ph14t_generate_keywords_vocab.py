@@ -7,7 +7,6 @@ from huggingface_hub import login
 
 hg_token = os.environ.get("HUGGINGFACE_HUB_TOKEN")
 login(hg_token)
-# model_id = "google/gemma-3-4b-it"
 model_id = "mistralai/Mistral-Small-3.1-24B-Instruct-2503"
 
 
@@ -36,7 +35,13 @@ def main(keyword_dir, output_dir):
                 vocab.update(tokens)
 
     vocab = sorted(list(vocab))
-    vocab = tokenizer.SPECIAL_TOKENS_ATTRIBUTES + vocab
+    # handel special tokens
+    vocab = [
+        tokenizer.bos_token,
+        tokenizer.eos_token,
+        tokenizer.unk_token,
+        tokenizer.pad_token,
+    ] + vocab
     with open(
         os.path.join(output_dir, "keywords_vocab.txt"), "w", encoding="utf-8"
     ) as f:
