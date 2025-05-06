@@ -1,0 +1,4 @@
+_target_: modules.TimmVisualEncoder
+backbone_id: "vit_base_patch16_224"
+img_size: 224
+out_channels: 1024

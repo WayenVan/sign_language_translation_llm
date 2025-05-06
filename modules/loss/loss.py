@@ -1,5 +1,4 @@
 from collections import namedtuple
-import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
@@ -11,10 +10,14 @@ class Loss(nn.Module):
 
     def __init__(self, padding_idx):
         super(Loss, self).__init__()
-        self.padding_idx = padding_idx
 
     def forward(
-        self, output, target_token_llm_features, target_tokens, target_token_mask
+        self,
+        output,
+        target_token_llm_features,
+        target_tokens,
+        target_token_mask,
+        padding_idx,
     ):
         """
         @param output: The output from the decoder, namedtuple containing:
@@ -33,7 +36,7 @@ class Loss(nn.Module):
         ce_loss = F.nll_loss(
             prob.flatten(0, 1),
             target_tokens.flatten(),
-            ignore_index=self.padding_idx,
+            ignore_index=padding_idx,
             reduction="mean",
         )
         loss += ce_loss

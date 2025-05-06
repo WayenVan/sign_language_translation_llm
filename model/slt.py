@@ -1,9 +1,7 @@
-from huggingface_hub.inference._generated.types import video_classification
-from numpy.polynomial.polyutils import as_series
 import torch
 from torch import nn
-from lightning import LightningDataModule, LightningModule
-from transformers import AutoTokenizer, AutoModelForCausalLM, PreTrainedTokenizerFast
+from lightning import LightningModule
+from transformers import AutoTokenizer
 from omegaconf import DictConfig
 from transformers.models.mistral3 import Mistral3ForConditionalGeneration
 from hydra.utils import instantiate
@@ -23,12 +21,19 @@ class SLTModel(LightningModule):
         self._create_llm_embedding_layer()
         self._create_vocab_convert_mapping()
         self.padding_idx = self.reverse_vocab[self.llm_tokenizer.pad_token]
+        self.bos_idx = self.reverse_vocab[self.llm_tokenizer.bos_token]
+        self.eos_idx = self.reverse_vocab[self.llm_tokenizer.eos_token]
 
-        self.visual_backbone = None
-        self.encoder = None
-        self.decoder = None
-
-        self.loss = None
+        self.visual_backbone = instantiate(cfg.visual_backbone)
+        self.encoder = instantiate(cfg.encoder)
+        self.decoder = instantiate(
+            cfg.decoder,
+            padding_idx=self.padding_idx,
+            bos_token_id=self.bos_idx,
+            eos_token_id=self.eos_idx,
+            vocab_size=len(vocab),
+        )
+        self.loss = instantiate(cfg.loss)
 
         self.train_accu = Accuracy(task="multiclass", num_classes=len(vocab))
 
@@ -154,6 +159,8 @@ class SLTModel(LightningModule):
     ):
         """
         Prepare the logits and target IDs for token-level accuracy calculation.
+        the valid_mask is to remove the padding tokens, the shape is:
+        [batch_size, seq_len]
         """
         # Flatten the logits and target IDs
         logits = logits.flatten(0, 1)

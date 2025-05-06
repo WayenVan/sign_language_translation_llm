@@ -1,0 +1,9 @@
+defaults:
+  - base_train
+  - decoder: llama_cross_decoder
+  - encoder: sign_bert_encoder
+  - visual_backbone: timm_visual_encoder
+  - loss: loss
+  - _self_
+
+debug: False

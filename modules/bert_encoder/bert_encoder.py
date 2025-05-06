@@ -113,7 +113,7 @@ if __name__ == "__main__":
         intermediate_size=2048,
         num_layers=6,
     ).cuda()
-    x = torch.randn(2, 30, 1024).cuda()  # (batch_size, seq_len, hidden_size)
+    x = torch.randn(2, 10, 1024).cuda()  # (batch_size, seq_len, hidden_size)
     v_lengths = torch.tensor([5, 8]).cuda()
     output, _, _ = model(x, v_lengths)
     print(output.shape)  # Should be (2, 30, 1024)
