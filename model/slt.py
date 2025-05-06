@@ -129,7 +129,7 @@ class SLTModel(LightningModule):
         keywords_ids_in, mask, keywords_lengths = self._pad_tokens_for_decoder(
             keywords_ids_in
         )
-        keywords_ids_out, _, _ = self._pad_tokens_for_decoder(keywords_ids_out)
+        keywords_ids_out, _mask, _ = self._pad_tokens_for_decoder(keywords_ids_out)
 
         keywords_llm_in = self.llm_tokenizer(
             keywords, return_tensors="pt", padding=True
@@ -138,6 +138,7 @@ class SLTModel(LightningModule):
         # assert the valid range of tokens between llms and my decoder should be the same
         for i in range(len(keywords_ids_in)):
             assert mask[i].cpu().tolist() == keywords_llm_in[i].attention_mask
+            assert mask[i].cpu().tolist() == _mask[i].cpu().tolist()
 
         return (
             keywords_ids_in,
@@ -149,7 +150,7 @@ class SLTModel(LightningModule):
 
     @torch.no_grad()
     def prepare_for_token_level_accuracy(
-        self, logits, keywords_ids_out, padding_mask, keywords_lengths
+        self, logits, keywords_ids_out, valid_mask, keywords_lengths
     ):
         """
         Prepare the logits and target IDs for token-level accuracy calculation.
@@ -159,8 +160,8 @@ class SLTModel(LightningModule):
         target_ids = keywords_ids_out.flatten()
 
         # Get the available logits and target IDs based on the padding mask
-        available_logits = logits[padding_mask.flatten() == 1, :]
-        available_target_ids = target_ids[padding_mask.flatten() == 1]
+        available_logits = logits[valid_mask.flatten() == 1, :]
+        available_target_ids = target_ids[valid_mask.flatten() == 1]
 
         return available_logits, available_target_ids
 
@@ -174,23 +175,25 @@ class SLTModel(LightningModule):
             keywords_ids_in,
             keywords_llm_in,
             keywords_ids_out,
-            padding_mask,
+            mask,
             keywords_lengths,
         ) = self.preprocess_train_keywords(keywords)
 
-        visaul_outputs = self.visual_backbone(video, video_length)
-        encoder_outputs = self.encoder(visaul_outputs)
+        v_feats, v_length = self.visual_backbone(video, video_length)
+        v_feats, v_length, video_padding_mask = self.encoder(v_feats, v_length)
         decoder_outputs = self.decoder(
-            encoder_outputs,
-            decoder_input_ids=keywords_ids_in,
-            padding_mask=padding_mask,
-            keywords_lengths=keywords_lengths,
+            input_ids=keywords_ids_in,
+            visual_hidden_states=v_feats,
+            attention_mask=mask,
+            video_padding_mask=video_padding_mask,
         )
+
+        target_token_llm_features = self.llm_embedding_layer(keywords_llm_in.input_ids)
         loss_outputs = self.loss(
             decoder_outputs,
             keywords_ids_out,
-            keywords_lengths=keywords_lengths,
-            padding_mask=padding_mask,
+            target_token_llm_features,
+            mask,
         )
 
         # Calculate the logits and target IDs for token-level accuracy
@@ -198,7 +201,7 @@ class SLTModel(LightningModule):
             self.prepare_for_token_level_accuracy(
                 decoder_outputs.logits,
                 keywords_ids_out,
-                padding_mask,
+                mask,
                 keywords_lengths,
             )
         )
