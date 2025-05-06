@@ -33,10 +33,10 @@ if is_torch_flex_attn_available():
 
 class LlamaCrossDecoder(LlamaPreTrainedModel):
     """
-    Transformer decoder consisting of *config.num_hidden_layers* layers. Each layer is a [`LlamaDecoderLayer`]
+    Transformer decoder modified directly from llama model.
+    It enabled addtional cross attention layer to decode the visual feature in auto regressive_manner.
+    Also support kv cache for high performance inference.
 
-    Args:
-        config: LlamaConfig
     """
 
     def __init__(
@@ -222,6 +222,14 @@ class LlamaCrossDecoder(LlamaPreTrainedModel):
             "attentions",
         ],
     )
+
+    def generate(
+        self,
+        visual_hidden_states: torch.Tensor,
+        visual_padding_mask: Optional[torch.Tensor] = None,
+        max_length: int = 100,
+    ) -> torch.LongTensor:
+        pass
 
     def _update_causal_mask(
         self,

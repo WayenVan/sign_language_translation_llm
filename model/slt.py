@@ -1,4 +1,5 @@
 from huggingface_hub.inference._generated.types import video_classification
+from numpy.polynomial.polyutils import as_series
 import torch
 from torch import nn
 from lightning import LightningDataModule, LightningModule
@@ -20,7 +21,8 @@ class SLTModel(LightningModule):
         self.reverse_vocab = {word: i for i, word in enumerate(vocab)}
         self._create_tokenizer()
         self._create_llm_embedding_layer()
-        self.padding_idx = self.reverse_vocab[self.llm_token.pad_token]
+        self._create_vocab_convert_mapping()
+        self.padding_idx = self.reverse_vocab[self.llm_tokenizer.pad_token]
 
         self.visual_backbone = None
         self.encoder = None
@@ -31,7 +33,8 @@ class SLTModel(LightningModule):
         self.train_accu = Accuracy(task="multiclass", num_classes=len(vocab))
 
     def _create_tokenizer(self):
-        self.llm_token = AutoTokenizer.from_pretrained(self.llm_id)
+        self.llm_tokenizer = AutoTokenizer.from_pretrained(self.llm_id)
+        self.llm_tokenizer.padding_side = "right"
 
     def _create_llm_embedding_layer(self):
         model = Mistral3ForConditionalGeneration.from_pretrained(
@@ -60,16 +63,29 @@ class SLTModel(LightningModule):
         lenghts = attnion_mask.sum(dim=-1)
         return padded, attnion_mask, lenghts
 
+    def _create_vocab_convert_mapping(self):
+        mapping = []  # index: llm_id -> my_vocab_id
+        for id_local in range(len(self.vocab)):
+            token = self.vocab[id_local]
+            id_llm = self.llm_tokenizer.convert_tokens_to_ids(token)
+            mapping.append(id_llm)
+
+        self.register_buffer(
+            "vocab_mapping_local_to_llm",
+            torch.tensor(mapping, dtype=torch.int64),
+            persistent=False,
+        )
+
     def sentence_to_ids(self, sentence, add_bos=False, add_eos=False):
         """
         Convert a sentence to a list of token IDs.
         """
-        tokens = self.llm_token.tokenize(sentence)
+        tokens = self.llm_tokenizer.tokenize(sentence)
         if add_bos:
-            tokens = [self.llm_token.bos_token] + tokens
+            tokens = [self.llm_tokenizer.bos_token] + tokens
 
         if add_eos:
-            tokens = tokens + [self.llm_token.eos_token]
+            tokens = tokens + [self.llm_tokenizer.eos_token]
 
         ids = [self.reverse_vocab[token] for token in tokens]
 
@@ -115,13 +131,17 @@ class SLTModel(LightningModule):
         )
         keywords_ids_out, _, _ = self._pad_tokens_for_decoder(keywords_ids_out)
 
-        keywords_ids_in_llm = self.llm_token(
+        keywords_llm_in = self.llm_tokenizer(
             keywords, return_tensors="pt", padding=True
         )
 
+        # assert the valid range of tokens between llms and my decoder should be the same
+        for i in range(len(keywords_ids_in)):
+            assert mask[i].cpu().tolist() == keywords_llm_in[i].attention_mask
+
         return (
             keywords_ids_in,
-            keywords_ids_in_llm,
+            keywords_llm_in,
             keywords_ids_out,
             mask,
             keywords_lengths,
@@ -150,9 +170,13 @@ class SLTModel(LightningModule):
         video = batch["video"]
         video_length = batch["video_length"]
 
-        keywords_ids_in, keywords_ids_out, padding_mask, keywords_lengths = (
-            self.preprocess_train_keywords(keywords)
-        )
+        (
+            keywords_ids_in,
+            keywords_llm_in,
+            keywords_ids_out,
+            padding_mask,
+            keywords_lengths,
+        ) = self.preprocess_train_keywords(keywords)
 
         visaul_outputs = self.visual_backbone(video, video_length)
         encoder_outputs = self.encoder(visaul_outputs)
@@ -230,9 +254,14 @@ if __name__ == "__main__":
             break
     (
         keyword_ids_in,
-        keyword_ids_in_llm,
+        keyword_llm_in,
         keyword_ids_out,
         attention_mask,
         keywords_lengths,
     ) = model.preprocess_train_keywords(idx)
-    print("keyword_ids_in", keyword_ids_in)
+
+    converted = []
+    for id in keyword_ids_in[0].cpu().tolist():
+        converted.append(model.vocab_mapping_local_to_llm[id].item())
+
+    print(keyword_llm_in[0].ids)
