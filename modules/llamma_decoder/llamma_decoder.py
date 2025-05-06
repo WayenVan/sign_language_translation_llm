@@ -2,6 +2,7 @@ from collections import namedtuple
 import torch
 import torch.nn as nn
 from typing import Optional
+from einops import repeat, rearrange
 
 from transformers.models.llama.modeling_llama import (
     LlamaRMSNorm,
@@ -42,11 +43,14 @@ class LlamaCrossDecoder(LlamaPreTrainedModel):
     def __init__(
         self,
         hidden_size,
+        llm_hidden_size,
         intermediate_size,
         num_attention_heads,
         num_hidden_layers,
         vocab_size,
         padding_idx,
+        bos_token_id,
+        eos_token_id,
     ):
         llm_config = self._generate_config(
             hidden_size,
@@ -55,14 +59,23 @@ class LlamaCrossDecoder(LlamaPreTrainedModel):
             num_hidden_layers,
             vocab_size,
             padding_idx,
+            bos_token_id,
+            eos_token_id,
         )
         super().__init__(llm_config)
         self.padding_idx = llm_config.pad_token_id
+        self.bos_token_id = llm_config.bos_token_id
+        self.eos_token_id = llm_config.eos_token_id
         self.vocab_size = llm_config.vocab_size
+        self.llm_hidden_size = llm_hidden_size
 
         self.embed_tokens = nn.Embedding(
-            llm_config.vocab_size, llm_config.hidden_size, self.padding_idx
+            llm_config.vocab_size, llm_hidden_size, self.padding_idx
         )
+        self.embed_compresss = nn.Linear(
+            llm_hidden_size, llm_config.hidden_size, bias=False
+        )
+
         self.layers = nn.ModuleList(
             [
                 LlamaCrossDecoderLayer(llm_config, layer_idx)
@@ -71,6 +84,8 @@ class LlamaCrossDecoder(LlamaPreTrainedModel):
         )
         self.norm = LlamaRMSNorm(llm_config.hidden_size, eps=llm_config.rms_norm_eps)
         self.rotary_emb = LlamaRotaryEmbedding(config=llm_config)
+
+        self.llm_head = nn.Linear(self.config.hidden_size, self.vocab_size, bias=False)
 
         # Initialize weights and apply final processing
         self.post_init()
@@ -83,6 +98,8 @@ class LlamaCrossDecoder(LlamaPreTrainedModel):
         num_hidden_layers,
         vocab_size,
         padding_idx,
+        bos_token_id,
+        eos_token_id,
     ):
         return LlamaConfig(
             hidden_size=hidden_size,
@@ -91,6 +108,8 @@ class LlamaCrossDecoder(LlamaPreTrainedModel):
             num_hidden_layers=num_hidden_layers,
             vocab_size=vocab_size,
             pad_token_id=padding_idx,
+            bos_token_id=bos_token_id,
+            eos_token_id=eos_token_id,
             hidden_act="silu",
             max_position_embeddings=2048,
             initializer_range=0.02,
@@ -105,8 +124,6 @@ class LlamaCrossDecoder(LlamaPreTrainedModel):
             pretraining_tp=None,
             head_dim=None,
             use_cache=None,
-            bos_token_id=None,
-            eos_token_id=None,
         )
 
     def forward(
@@ -140,7 +157,8 @@ class LlamaCrossDecoder(LlamaPreTrainedModel):
         if visual_hidden_states is None:
             raise ValueError("You must specify visual_hidden_states")
 
-        inputs_embeds = self.embed_tokens(input_ids)
+        llm_embeds = self.embed_tokens(input_ids)
+        inputs_embeds = self.embed_compresss(llm_embeds)
 
         if use_cache and past_key_values is None:
             past_key_values = DynamicCache()
@@ -201,12 +219,15 @@ class LlamaCrossDecoder(LlamaPreTrainedModel):
                 all_cross_attns += (layer_outputs[2],)
 
         hidden_states = self.norm(hidden_states)
+        logits = self.llm_head(hidden_states)
 
         # add hidden states from the last decoder layer
         if output_hidden_states:
             all_hidden_states += (hidden_states,)
 
         return self.LlamaCrossDecoderOutputs(
+            logits=logits,
+            token_llm_features=llm_embeds,
             last_hidden_state=hidden_states,
             past_key_values=past_key_values if use_cache else None,
             hidden_states=all_hidden_states,
@@ -216,6 +237,8 @@ class LlamaCrossDecoder(LlamaPreTrainedModel):
     LlamaCrossDecoderOutputs = namedtuple(
         "LlamaCrossDecoderOutputs",
         [
+            "logits",
+            "token_llm_features",
             "last_hidden_state",
             "past_key_values",
             "hidden_states",
@@ -227,9 +250,41 @@ class LlamaCrossDecoder(LlamaPreTrainedModel):
         self,
         visual_hidden_states: torch.Tensor,
         visual_padding_mask: Optional[torch.Tensor] = None,
-        max_length: int = 100,
+        max_length: int = 10,
     ) -> torch.LongTensor:
-        pass
+        B = visual_hidden_states.shape[0]
+        device = visual_hidden_states.device
+        kv_cache = DynamicCache()
+        bos = torch.tensor([self.bos_token_id] * B, device=device)
+        bos = rearrange(bos, "b -> b 1")
+
+        eos_flags = [False] * B
+        ret = []
+        output = None
+        for i in range(max_length):
+            if i == 0:
+                input_ids = bos
+            else:
+                input_ids = output[:, -1:]
+
+            outputs = self(
+                input_ids=input_ids,
+                visual_hidden_states=visual_hidden_states,
+                visual_padding_mask=visual_padding_mask,
+                past_key_values=kv_cache,
+                use_cache=True,
+            )
+            output = outputs.logits.argmax(-1)[:, -1:]
+            ret.append(output)
+
+            for i, idx in enumerate(output[:, -1].cpu().tolist()):
+                if idx == self.eos_token_id:
+                    eos_flags[i] = True
+
+            if all(eos_flags):
+                break
+
+        return torch.cat(ret, dim=1)
 
     def _update_causal_mask(
         self,
