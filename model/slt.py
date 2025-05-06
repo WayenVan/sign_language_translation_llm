@@ -1,13 +1,12 @@
 from huggingface_hub.inference._generated.types import video_classification
 import torch
-from torch import device, nn
+from torch import nn
 from lightning import LightningDataModule, LightningModule
 from transformers import AutoTokenizer, AutoModelForCausalLM, PreTrainedTokenizerFast
 from omegaconf import DictConfig
 from transformers.models.mistral3 import Mistral3ForConditionalGeneration
 from hydra.utils import instantiate
-
-print(torch.cuda.is_bf16_supported())
+from torchmetrics import Accuracy
 
 
 class SLTModel(LightningModule):
@@ -26,6 +25,10 @@ class SLTModel(LightningModule):
         self.visual_backbone = None
         self.encoder = None
         self.decoder = None
+
+        self.loss = None
+
+        self.train_accu = Accuracy(task="multiclass", num_classes=len(vocab))
 
     def _create_tokenizer(self):
         self.llm_token = AutoTokenizer.from_pretrained(self.llm_id)
@@ -107,8 +110,8 @@ class SLTModel(LightningModule):
             for k in keywords
         ]
 
-        keywords_ids_in, attention_mask, keywords_lengths = (
-            self._pad_tokens_for_decoder(keywords_ids_in)
+        keywords_ids_in, mask, keywords_lengths = self._pad_tokens_for_decoder(
+            keywords_ids_in
         )
         keywords_ids_out, _, _ = self._pad_tokens_for_decoder(keywords_ids_out)
 
@@ -120,24 +123,80 @@ class SLTModel(LightningModule):
             keywords_ids_in,
             keywords_ids_in_llm,
             keywords_ids_out,
-            attention_mask,
+            mask,
             keywords_lengths,
         )
+
+    @torch.no_grad()
+    def prepare_for_token_level_accuracy(
+        self, logits, keywords_ids_out, padding_mask, keywords_lengths
+    ):
+        """
+        Prepare the logits and target IDs for token-level accuracy calculation.
+        """
+        # Flatten the logits and target IDs
+        logits = logits.flatten(0, 1)
+        target_ids = keywords_ids_out.flatten()
+
+        # Get the available logits and target IDs based on the padding mask
+        available_logits = logits[padding_mask.flatten() == 1, :]
+        available_target_ids = target_ids[padding_mask.flatten() == 1]
+
+        return available_logits, available_target_ids
 
     def training_step(self, batch, batch_idx):
         names = batch["names"]
         keywords = batch["keywords"]
         video = batch["video"]
         video_length = batch["video_length"]
-        keywords_ids_in, keywords_ids_out, attention_mask, keywords_lengths = (
+
+        keywords_ids_in, keywords_ids_out, padding_mask, keywords_lengths = (
             self.preprocess_train_keywords(keywords)
         )
-        return None
+
+        visaul_outputs = self.visual_backbone(video, video_length)
+        encoder_outputs = self.encoder(visaul_outputs)
+        decoder_outputs = self.decoder(
+            encoder_outputs,
+            decoder_input_ids=keywords_ids_in,
+            padding_mask=padding_mask,
+            keywords_lengths=keywords_lengths,
+        )
+        loss_outputs = self.loss(
+            decoder_outputs,
+            keywords_ids_out,
+            keywords_lengths=keywords_lengths,
+            padding_mask=padding_mask,
+        )
+
+        # Calculate the logits and target IDs for token-level accuracy
+        avialiable_predicted_ids, avialiable_target_ids = (
+            self.prepare_for_token_level_accuracy(
+                decoder_outputs.logits,
+                keywords_ids_out,
+                padding_mask,
+                keywords_lengths,
+            )
+        )
+        self.train_accu.update(avialiable_predicted_ids, avialiable_target_ids)
+
+        # Log the loss
+        for loss_name in loss_outputs.as_dict():
+            self.log(loss_name, loss_outputs[loss_name], prog_bar=True)
+
+        return loss_outputs.loss
+
+    def on_train_epoch_end(self, outputs):
+        """
+        Called at the end of each training epoch.
+        """
+        # Calculate and log the accuracy
+        train_acc = self.train_accu.compute()
+        self.log("train_token_level_accu", train_acc, prog_bar=True)
+        self.train_accu.reset()
 
     def validation_step(self, batch, batch_idx):
-        outputs = self(batch["input_ids"], attention_mask=batch["attention_mask"])
-        val_loss = outputs.loss
-        self.log("val_loss", val_loss)
+        pass
 
     def train(self, is_train):
         """

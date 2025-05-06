@@ -4,6 +4,7 @@ from transformers import AutoTokenizer, AutoModelForCausalLM
 from transformers.models.mistral3 import Mistral3ForConditionalGeneration
 import os
 import torch
+import numpy as np
 
 print(torch.cuda.device_count())
 

@@ -3,9 +3,23 @@
     "basedpyright": {
       "basedpyright.analysis.include": [
         "scripts/**",
-        "model/**"
+        "model/**",
+        "modules/**",
+        "tests/**"
       ],
-      "basedpyright.analysis.typeCheckingMode": "off"
+      "basedpyright.analysis.exclude": [
+        "**/node_modules/**",
+        "**/__pycache__/**",
+        "**/.venv/**",
+        "**/.git/**",
+        "**/.tox/**",
+        "**/.mypy_cache/**",
+        "**/.pytest_cache/**",
+        "dataset",
+        "outputs"
+      ],
+      "basedpyright.analysis.typeCheckingMode": "off",
+      "basedpyright.analysis.useLibraryCodeForTypes": false
     }
   }
 }
