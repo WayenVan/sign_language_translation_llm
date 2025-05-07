@@ -1,3 +1,4 @@
+from numpy import ma
 import torch
 from torch import nn
 from lightning import LightningModule
@@ -35,7 +36,12 @@ class SLTModel(LightningModule):
         )
         self.loss = instantiate(cfg.loss)
 
-        self.train_accu = Accuracy(task="multiclass", num_classes=len(vocab))
+        self.train_accu = Accuracy(
+            task="multiclass", num_classes=len(vocab), ignore_index=self.padding_idx
+        )
+        self.val_accu = Accuracy(
+            task="multiclass", num_classes=len(vocab), ignore_index=self.padding_idx
+        )
 
     def _create_tokenizer(self):
         self.llm_tokenizer = AutoTokenizer.from_pretrained(self.llm_id)
@@ -100,17 +106,22 @@ class SLTModel(LightningModule):
 
     def forward(
         self,
-        x,
+        video,
         video_length=None,
+        max_length=None,
     ):
         """
         Forward pass through the model.
         """
 
-        visual_features, v_length = self.video_backbone(x, video_length)
-        encoded_features = self.encoder(visual_features, v_length)
-        decoded_features = self.decoder.generate(visual_features, v_length)
-        return decoded_features
+        v_feats, v_length = self.visual_backbone(video, video_length)
+        v_feats, v_length, video_padding_mask = self.encoder(v_feats, v_length)
+        decoder_outputs = self.decoder(
+            visual_hidden_states=v_feats,
+            video_padding_mask=video_padding_mask,
+            max_length=max_length,
+        )
+        return decoder_outputs
 
     def preprocess_train_keywords(self, keywords):
         keywords_ids_in = [
@@ -153,30 +164,11 @@ class SLTModel(LightningModule):
             keywords_lengths,
         )
 
-    @torch.no_grad()
-    def prepare_for_token_level_accuracy(
-        self, logits, keywords_ids_out, valid_mask, keywords_lengths
-    ):
-        """
-        Prepare the logits and target IDs for token-level accuracy calculation.
-        the valid_mask is to remove the padding tokens, the shape is:
-        [batch_size, seq_len]
-        """
-        # Flatten the logits and target IDs
-        logits = logits.flatten(0, 1)
-        target_ids = keywords_ids_out.flatten()
-
-        # Get the available logits and target IDs based on the padding mask
-        available_logits = logits[valid_mask.flatten() == 1, :]
-        available_target_ids = target_ids[valid_mask.flatten() == 1]
-
-        return available_logits, available_target_ids
-
     def training_step(self, batch, batch_idx):
         names = batch["names"]
         keywords = batch["keywords"]
-        video = batch["video"]
-        video_length = batch["video_length"]
+        video = batch["video"].to(self.device)
+        video_length = batch["video_length"].to(self.device)
 
         (
             keywords_ids_in,
@@ -195,28 +187,25 @@ class SLTModel(LightningModule):
             video_padding_mask=video_padding_mask,
         )
 
-        target_token_llm_features = self.llm_embedding_layer(keywords_llm_in.input_ids)
+        target_token_llm_features = self.llm_embedding_layer(
+            keywords_llm_in.input_ids.to(self.device)
+        )
         loss_outputs = self.loss(
             decoder_outputs,
-            keywords_ids_out,
             target_token_llm_features,
+            keywords_ids_out,
             mask,
+            self.padding_idx,
         )
 
         # Calculate the logits and target IDs for token-level accuracy
-        avialiable_predicted_ids, avialiable_target_ids = (
-            self.prepare_for_token_level_accuracy(
-                decoder_outputs.logits,
-                keywords_ids_out,
-                mask,
-                keywords_lengths,
-            )
+        self.train_accu.update(
+            decoder_outputs.logits.flatten(0, 1), keywords_ids_out.flatten()
         )
-        self.train_accu.update(avialiable_predicted_ids, avialiable_target_ids)
 
         # Log the loss
-        for loss_name in loss_outputs.as_dict():
-            self.log(loss_name, loss_outputs[loss_name], prog_bar=True)
+        for loss_name in loss_outputs._asdict():
+            self.log(loss_name, getattr(loss_outputs, loss_name), prog_bar=True)
 
         return loss_outputs.loss
 
@@ -229,8 +218,51 @@ class SLTModel(LightningModule):
         self.log("train_token_level_accu", train_acc, prog_bar=True)
         self.train_accu.reset()
 
+    @torch.no_grad()
     def validation_step(self, batch, batch_idx):
-        pass
+        # teaching forceing when evalute the metrics
+        names = batch["names"]
+        keywords = batch["keywords"]
+        video = batch["video"].to(self.device)
+        video_length = batch["video_length"].to(self.device)
+
+        (
+            keywords_ids_in,
+            keywords_llm_in,
+            keywords_ids_out,
+            mask,
+            keywords_lengths,
+        ) = self.preprocess_train_keywords(keywords)
+
+        v_feats, v_length = self.visual_backbone(video, video_length)
+        v_feats, v_length, video_padding_mask = self.encoder(v_feats, v_length)
+        decoder_outputs = self.decoder(
+            input_ids=keywords_ids_in,
+            visual_hidden_states=v_feats,
+            attention_mask=mask,
+            video_padding_mask=video_padding_mask,
+        )
+
+        target_token_llm_features = self.llm_embedding_layer(
+            keywords_llm_in.input_ids.to(self.device)
+        )
+        loss_outputs = self.loss(
+            decoder_outputs,
+            target_token_llm_features,
+            keywords_ids_out,
+            mask,
+            self.padding_idx,
+        )
+
+        # Calculate the logits and target IDs for token-level accuracy
+        self.val_accu.update(
+            decoder_outputs.logits.flatten(0, 1), keywords_ids_out.flatten()
+        )
+
+    def on_validation_epoch_end(self, outputs):
+        val_acc = self.val_accu.compute()
+        self.log("val_token_level_accu", val_acc, prog_bar=True)
+        self.val_accu.reset()
 
     def train(self, is_train):
         """

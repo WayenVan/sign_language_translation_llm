@@ -1,1 +1,3 @@
-_target_ modules.Loss
+_target_: modules.Loss
+ce_weight: 1.0
+mse_weight: 1.0

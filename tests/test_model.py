@@ -4,6 +4,7 @@ sys.path.append(".")
 from model.slt import SLTModel
 from omegaconf import DictConfig
 from hydra import compose, initialize
+import torch
 
 
 def test_slt_model():
@@ -18,11 +19,21 @@ def test_slt_model():
 
     df = pl.read_csv("outputs/keywords/train-extracted-keywords.csv", separator="|")
 
-    idx = []
+    kws = []
     for keywords in df["keywords"]:
-        idx.append(keywords)
-        if len(idx) > 10:
+        kws.append(keywords)
+        if len(kws) >= 2:
             break
+
+    batch = {
+        "names": kws,
+        "keywords": kws,
+        "video": torch.randn(2, 10, 3, 224, 224).cuda(),
+        "video_length": torch.tensor([10, 8]).cuda(),
+    }
+
+    model.training_step(batch, 0)
+    model.validation_step(batch, 0)
 
 
 if __name__ == "__main__":
