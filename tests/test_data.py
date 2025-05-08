@@ -32,10 +32,7 @@ def test_datamodule():
     datamodule.setup("fit")
     train_dataloader = datamodule.train_dataloader()
     for batch in tqdm(train_dataloader):
-        # print(batch)
-        # print(batch["video"].shape)
-        # print(batch["video_length"])
-        print(batch["keywords"])
+        print(batch["video"].shape)
         # print(batch["translation"])
         pass
 

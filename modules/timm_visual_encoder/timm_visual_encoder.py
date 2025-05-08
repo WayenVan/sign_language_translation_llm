@@ -9,11 +9,11 @@ class TimmVisualEncoder(nn.Module):
     def __init__(
         self,
         backbone_id,
-        img_size,
         out_channels,
         dropout_s=0.5,
         drop_path_rate_s=0.1,
         dropout_t=0.5,
+        **kwargs,
     ):
         super().__init__()
         self.backbone = timm.create_model(
@@ -21,9 +21,9 @@ class TimmVisualEncoder(nn.Module):
             pretrained=True,
             num_classes=0,
             in_chans=3,
-            img_size=img_size,
             drop_rate=dropout_s,
             drop_path_rate=drop_path_rate_s,
+            **kwargs,
         )
         self.backbone_out_feautres = self.backbone.num_features
         self.tconv = TemporalConv1D(

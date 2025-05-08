@@ -166,7 +166,6 @@ class SLTModel(LightningModule):
         )
 
     def training_step(self, batch, batch_idx):
-        names = batch["names"]
         keywords = batch["keywords"]
         video = batch["video"].to(self.device)
         video_length = batch["video_length"].to(self.device)
@@ -219,7 +218,6 @@ class SLTModel(LightningModule):
         self.log("train_token_level_accu", train_acc, prog_bar=True)
         self.train_accu.reset()
 
-    @torch.no_grad()
     def validation_step(self, batch, batch_idx):
         # teaching forceing when evalute the metrics
         names = batch["names"]

@@ -1,12 +1,12 @@
 from .video import (
-    RandomCrop3DVideo,
+    RandomResizedCropVideo,
     ResizeVideo,
     NormalizeVideo,
     ToTensorVideo,
 )
 
 __all__ = [
-    "RandomCrop3DVideo",
+    "RandomResizedCropVideo",
     "ResizeVideo",
     "NormalizeVideo",
     "ToTensorVideo",

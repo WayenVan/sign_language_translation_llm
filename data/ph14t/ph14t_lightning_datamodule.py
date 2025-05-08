@@ -5,6 +5,7 @@ from data.ph14t.ph14t_torch_dataset import Ph14KeywordDataset
 from torch.utils.data import DataLoader
 from omegaconf import DictConfig
 from hydra.utils import instantiate
+import numpy as np
 
 
 class Ph14TDataModule(LightningDataModule):
@@ -81,7 +82,12 @@ class Ph14TDataModule(LightningDataModule):
 
     @staticmethod
     def collate_fn(batch):
-        videos = [torch.tensor(item["video"], dtype=torch.float32) for item in batch]
+        videos = [
+            torch.from_numpy(item["video"])
+            if isinstance(item["video"], np.ndarray)
+            else item["video"]
+            for item in batch
+        ]
         v_length = [video.shape[0] for video in videos]
         max_v_length = max(v_length)
         padded_videos = [
@@ -92,7 +98,7 @@ class Ph14TDataModule(LightningDataModule):
         keywords = [item["keywords"] for item in batch]
 
         return dict(
-            videos=padded_videos,
-            v_length=v_length,
+            video=padded_videos,
+            video_length=torch.tensor(v_length, dtype=torch.int64),
             keywords=keywords,
         )

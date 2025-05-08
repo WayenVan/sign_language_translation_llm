@@ -1,16 +1,39 @@
 import torch
-from kornia.augmentation import RandomCrop3D, Resize, Normalize, CenterCrop3D
-from torchvision import transforms
+from kornia.augmentation import (
+    Resize,
+    Normalize,
+    CenterCrop,
+    RandomResizedCrop,
+)
 
 
-class RandomCrop3DVideo:
-    def __init__(self, *args, **kwargs):
-        self.crop = RandomCrop3D(*args, **kwargs)
+class RandomResizedCropVideo:
+    """
+    Random Crop Resize for video, not that the parameters used inside the video is the same  across the batch
+    """
+
+    def __init__(self, size, scale, ratio, p=1.0):
+        self.crop = RandomResizedCrop(
+            tuple(size), scale=tuple(scale), ratio=tuple(ratio), p=p, same_on_batch=True
+        )
 
     def __call__(self, data):
         video = data["video"]
-        video = self.crop(video)
-        data["video"] = video
+        data["video"] = self.crop(video)
+        return data
+
+
+class CenterCropVideo:
+    """
+    Center Crop Resize for video, not that the parameters used inside the video is the same  across the Temporal dimension
+    """
+
+    def __init__(self, size, p=1.0):
+        self.crop = CenterCrop(tuple(size), p=p, same_on_batch=True)
+
+    def __call__(self, data):
+        video = data["video"]
+        data["video"] = self.crop(video)
         return data
 
 

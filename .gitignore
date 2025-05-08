@@ -1,4 +1,5 @@
 .aider*
+lightning_logs/
 outputs
 dataset
 # Byte-compiled / optimized / DLL files
