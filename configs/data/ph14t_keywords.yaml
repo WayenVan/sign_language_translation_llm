@@ -1,0 +1,27 @@
+batch_size: 2
+batch_size_val_test: 1
+
+data_root: dataset/PHOENIX-2014-T-release-v3
+keyword_dir: outputs/keywords
+vocab_file: outputs/keywords_vocab.txt
+
+transforms:
+  train:
+    _target_: torchvision.transforms.Compose
+    transforms:
+      - _target_: data.transforms.ToTensorVideo
+      # - _target_: data.transforms.ResizeVideo
+      #   size: [224, 224]
+      # - _target_: data.transforms.RandomCrop3DVideo
+      #   size: []
+
+      # resample: bilinear
+  val: null
+  test: null
+
+datamodule:
+  _target_: data.Ph14TDataModule
+  pin_memory: true # NOTE: any other keywords for dataloader
+  shuffle: false
+  num_workers: 6
+  prefetch_factor: 2

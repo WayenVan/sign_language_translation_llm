@@ -7,6 +7,7 @@ from omegaconf import DictConfig
 from transformers.models.mistral3 import Mistral3ForConditionalGeneration
 from hydra.utils import instantiate
 from torchmetrics import Accuracy
+from torch.optim import Optimizer
 
 
 class SLTModel(LightningModule):
@@ -246,13 +247,14 @@ class SLTModel(LightningModule):
         target_token_llm_features = self.llm_embedding_layer(
             keywords_llm_in.input_ids.to(self.device)
         )
-        loss_outputs = self.loss(
-            decoder_outputs,
-            target_token_llm_features,
-            keywords_ids_out,
-            mask,
-            self.padding_idx,
-        )
+        # NOTE: we don't need to calculate the loss in validation step, but maybe we need?
+        # loss_outputs = self.loss(
+        #     decoder_outputs,
+        #     target_token_llm_features,
+        #     keywords_ids_out,
+        #     mask,
+        #     self.padding_idx,
+        # )
 
         # Calculate the logits and target IDs for token-level accuracy
         self.val_accu.update(
@@ -270,6 +272,30 @@ class SLTModel(LightningModule):
         """
         super().train(is_train)
         self.llm_embedding_layer.eval()  # always eval for llm embedding layer
+
+    def configure_optimizers(self):
+        opt: Optimizer = instantiate(
+            self.cfg.engine.optimizer,
+            [
+                {
+                    "params": filter(
+                        lambda p: p.requires_grad, self.visual_backbone.parameters()
+                    )
+                },
+                {
+                    "params": filter(
+                        lambda p: p.requires_grad, self.encoder.parameters()
+                    )
+                },
+                {
+                    "params": filter(
+                        lambda p: p.requires_grad, self.decoder.parameters()
+                    )
+                },
+            ],
+        )
+        scheduler = instantiate(self.cfg.engine.lr_scheduler, opt)
+        return {"optimizer": opt, "lr_scheduler": scheduler}
 
 
 if __name__ == "__main__":

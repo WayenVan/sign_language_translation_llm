@@ -1,2 +1,10 @@
 defaults:
+  - decoder: llama_cross_decoder
+  - encoder: sign_bert_encoder
+  - visual_backbone: timm_visual_encoder
+  - loss: loss
+  - engine: default
+  - data: ph14t_keywords
   - _self_
+
+debug: True

@@ -2,7 +2,6 @@ import sys
 
 sys.path.append(".")
 from model.slt import SLTModel
-from omegaconf import DictConfig
 from hydra import compose, initialize
 import torch
 
@@ -31,6 +30,7 @@ def test_slt_model():
         "video": torch.randn(2, 10, 3, 224, 224).cuda(),
         "video_length": torch.tensor([10, 8]).cuda(),
     }
+    engines = model.configure_optimizers()
 
     model.training_step(batch, 0)
     model.validation_step(batch, 0)
