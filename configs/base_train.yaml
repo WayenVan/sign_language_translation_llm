@@ -7,5 +7,10 @@ defaults:
   - data: ph14t_keywords
   - _self_
 
+hydra:
+  run:
+    dir: outputs/${hydra.job.name}/${now:%Y-%m-%d_%H-%M-%S}
+
+max_epochs: 50
 debug: True
 devices: [0, 1]

@@ -1,13 +1,14 @@
 import sys
 import os
+import logging
 
 sys.path.append(
-    os.path.abspath(os.path.join(os.getcwd(), "../"))
+    os.path.abspath(os.path.join(os.getcwd()))
 )  # NOTE: this is the initial cwd when runing the sciprt, the hydra will change the cwd to the output dir
 
 import hydra
 from hydra.utils import instantiate
-from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf
 
 from torch.cuda.amp.grad_scaler import GradScaler
 
@@ -16,6 +17,10 @@ from lightning.pytorch import plugins
 from lightning.pytorch import callbacks
 
 from model.slt import SLTModel
+import cv2
+
+logger = logging.getLogger(__name__)  # NOTE: lightning already setupo the logger for us
+cv2.setNumThreads(0)  # NOTE: set the number of threads to 0 to avoid cv2 error
 
 
 # NOTE: the hydra appp only inisitalize once
@@ -26,7 +31,7 @@ def main(cfg: DictConfig) -> None:
 
 def train(cfg: DictConfig) -> None:
     working_dir = hydra.core.hydra_config.HydraConfig.get().runtime.output_dir
-    print(f"Output directory: {working_dir}")
+    logger.info(f"Output directory: {working_dir}")
 
     # NOTE: load vocab
     with open(cfg.data.vocab_file, "r", encoding="utf-8") as f:
@@ -38,7 +43,7 @@ def train(cfg: DictConfig) -> None:
         callbacks.LearningRateMonitor("step", log_momentum=True),
         callbacks.ModelCheckpoint(
             dirpath="checkpoints",
-            filename="epoch={epoch:02d}-wer={vall_accu:.2f}",
+            filename="epoch={epoch:02d}-wer={val_accu:.2f}",
             monitor="val_wer",
             mode="max",
             save_last=True,
@@ -52,18 +57,9 @@ def train(cfg: DictConfig) -> None:
         devices=getattr(cfg, "devices", "auto"),
         callbacks=cbs,
         log_every_n_steps=50,
-        max_epochs=50,
+        max_epochs=cfg.max_epochs,
         sync_batchnorm=True,
-        gradient_clip_val=1.0,
-        plugins=[
-            plugins.MixedPrecision(
-                precision="16-mixed",
-                device="cuda",
-                scaler=GradScaler(
-                    growth_interval=100,
-                ),
-            ),
-        ],
+        precision="16-mixed",
     )
 
     datamodule = instantiate(cfg.data.datamodule, cfg)

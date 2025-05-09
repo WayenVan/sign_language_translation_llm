@@ -9,6 +9,9 @@ from hydra.utils import instantiate
 from torchmetrics import Accuracy
 from torch.optim import Optimizer
 from typing import Dict, Any
+import logging
+
+logger = logging.getLogger(__name__)  # NOTE: lightning already setupo the logger for us
 
 
 class SLTModel(LightningModule):
@@ -102,8 +105,6 @@ class SLTModel(LightningModule):
 
         ids = [self.reverse_vocab[token] for token in tokens]
 
-        if self.debug:
-            print(f"tokens: {sentence}")
         return ids
 
     def forward(
@@ -207,6 +208,10 @@ class SLTModel(LightningModule):
         # Log the loss
         for loss_name in loss_outputs._asdict():
             self.log(loss_name, getattr(loss_outputs, loss_name), prog_bar=True)
+
+        if self.debug:
+            logger.info(f"keywords_ids_in: {keywords_ids_in}")
+            logger.info(f"keywords_ids_out: {keywords_ids_out}")
 
         return loss_outputs.loss
 
