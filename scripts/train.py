@@ -1,31 +1,56 @@
 import sys
+import os
 
-sys.path.append(".")
-from omegaconf import DictConfig
+sys.path.append(
+    os.path.abspath(os.path.join(os.getcwd(), "../"))
+)  # NOTE: this is the initial cwd when runing the sciprt, the hydra will change the cwd to the output dir
+
 import hydra
-import polars as pl
-from model.slt import SLTModel
-from hydra import compose, initialize
-import torch
+from hydra.utils import instantiate
+from omegaconf import DictConfig
+
+from torch.cuda.amp.grad_scaler import GradScaler
+
 from lightning import Trainer
 from lightning.pytorch import plugins
-from torch.cuda.amp.grad_scaler import GradScaler
-from hydra.utils import instantiate
+from lightning.pytorch import callbacks
+
+from model.slt import SLTModel
 
 
-@hydra.main(config_path="../configs", config_name="test_train")
+# NOTE: the hydra appp only inisitalize once
+@hydra.main(config_path="../configs", config_name="test_train", version_base="1.3.2")
 def main(cfg: DictConfig) -> None:
-    initialize(config_path="../configs")
-    cfg = compose("test_train")
+    train(cfg)
 
-    with open("outputs/keywords_vocab.txt", "r", encoding="utf-8") as f:
+
+def train(cfg: DictConfig) -> None:
+    working_dir = hydra.core.hydra_config.HydraConfig.get().runtime.output_dir
+    print(f"Output directory: {working_dir}")
+
+    # NOTE: load vocab
+    with open(cfg.data.vocab_file, "r", encoding="utf-8") as f:
         vocab = [line.strip() for line in f if line.strip()]  # Remove empty lines
 
+    # NOTE: define callbacks for trainer
+    cbs = [
+        callbacks.RichProgressBar(),
+        callbacks.LearningRateMonitor("step", log_momentum=True),
+        callbacks.ModelCheckpoint(
+            dirpath="checkpoints",
+            filename="epoch={epoch:02d}-wer={vall_accu:.2f}",
+            monitor="val_wer",
+            mode="max",
+            save_last=True,
+        ),
+    ]
+
+    # NOTE: start training
     t = Trainer(
         accelerator="gpu",
         strategy="ddp",
         devices=getattr(cfg, "devices", "auto"),
-        callbacks=[],
+        callbacks=cbs,
         log_every_n_steps=50,
         max_epochs=50,
         sync_batchnorm=True,

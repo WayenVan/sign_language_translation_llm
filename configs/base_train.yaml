@@ -8,3 +8,4 @@ defaults:
   - _self_
 
 debug: True
+devices: [0, 1]

@@ -1,9 +1,9 @@
-batch_size: 2
+batch_size: 1
 batch_size_val_test: 1
 
-data_root: dataset/PHOENIX-2014-T-release-v3
-keyword_dir: outputs/keywords
-vocab_file: outputs/keywords_vocab.txt
+data_root: /root/projects/slt_set_llms/dataset/PHOENIX-2014-T-release-v3
+keyword_dir: /root/projects/slt_set_llms/outputs/keywords
+vocab_file: /root/projects/slt_set_llms/outputs/keywords_vocab.txt
 
 transforms:
   train:
@@ -25,13 +25,13 @@ transforms:
         width: 224
       - _target_: data.transforms.ToTensorVideo
 
-  test: null #NOTE: same as the val
+  test: null # NOTE: same as the val
 
 datamodule:
   _target_: data.ph14t.Ph14TDataModule
   pin_memory: true # NOTE: any other keywords for dataloader
   shuffle: false
-  num_workers: 6
+  num_workers: 2
   persistent_workers: true
   multiprocessing_context: spawn
   prefetch_factor: 2

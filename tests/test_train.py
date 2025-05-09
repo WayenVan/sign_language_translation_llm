@@ -14,6 +14,9 @@ def test_train():
     from lightning.pytorch import plugins
     from torch.cuda.amp.grad_scaler import GradScaler
     from hydra.utils import instantiate
+    import cv2
+
+    cv2.setNumThreads(0)
 
     initialize(config_path="../configs")
     cfg = compose("test_train")
