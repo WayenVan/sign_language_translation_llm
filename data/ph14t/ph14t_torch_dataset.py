@@ -40,6 +40,7 @@ class Ph14KeywordDataset(Dataset):
         ]
 
         ret = dict(
+            id=id,
             # NOTE: [time, height, width, channel], normalized to [0, 1]
             video=numpy.array(video_frame, dtype=numpy.float32) / 255.0,
             translation=data_info["translation"],

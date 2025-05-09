@@ -96,8 +96,9 @@ class Ph14TDataModule(LightningDataModule):
         ]
         padded_videos = torch.stack(padded_videos)
         keywords = [item["keywords"] for item in batch]
-
+        ids = [item["id"] for item in batch]
         return dict(
+            ids=ids,
             video=padded_videos,
             video_length=torch.tensor(v_length, dtype=torch.int64),
             keywords=keywords,

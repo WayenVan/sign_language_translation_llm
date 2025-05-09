@@ -8,6 +8,7 @@ from transformers.models.mistral3 import Mistral3ForConditionalGeneration
 from hydra.utils import instantiate
 from torchmetrics import Accuracy
 from torch.optim import Optimizer
+from typing import Dict, Any
 
 
 class SLTModel(LightningModule):
@@ -220,7 +221,7 @@ class SLTModel(LightningModule):
 
     def validation_step(self, batch, batch_idx):
         # teaching forceing when evalute the metrics
-        names = batch["names"]
+        ids = batch["ids"]
         keywords = batch["keywords"]
         video = batch["video"].to(self.device)
         video_length = batch["video_length"].to(self.device)
@@ -259,7 +260,7 @@ class SLTModel(LightningModule):
             decoder_outputs.logits.flatten(0, 1), keywords_ids_out.flatten()
         )
 
-    def on_validation_epoch_end(self, outputs):
+    def on_validation_epoch_end(self):
         val_acc = self.val_accu.compute()
         self.log("val_token_level_accu", val_acc, prog_bar=True)
         self.val_accu.reset()
@@ -294,6 +295,11 @@ class SLTModel(LightningModule):
         )
         scheduler = instantiate(self.cfg.engine.lr_scheduler, opt)
         return {"optimizer": opt, "lr_scheduler": scheduler}
+
+    def on_save_checkpoint(self, state_dict: Dict[str, Any]) -> None:
+        for key in state_dict:
+            if key.startswith("llm_embedding_layer"):
+                del state_dict[key]
 
 
 if __name__ == "__main__":

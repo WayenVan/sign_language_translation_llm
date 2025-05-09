@@ -9,16 +9,20 @@ transforms:
   train:
     _target_: torchvision.transforms.Compose
     transforms:
+      - _target_: data.transforms.ResizeVideo
+        height: 256
+        width: 256
+      - _target_: data.transforms.RandomCropVideo
+        height: 224
+        width: 224
       - _target_: data.transforms.ToTensorVideo
-      - _target_: data.transforms.RandomResizedCropVideo
-        size: [260, 210]
-        scale: [0.5, 1.0]
-        ratio: [0.75, 1.3333]
-        p: 0.8
 
   val:
     _target_: torchvision.transforms.Compose
     transforms:
+      - _target_: data.transforms.ResizeVideo
+        height: 224
+        width: 224
       - _target_: data.transforms.ToTensorVideo
 
   test: null #NOTE: same as the val
@@ -27,7 +31,7 @@ datamodule:
   _target_: data.ph14t.Ph14TDataModule
   pin_memory: true # NOTE: any other keywords for dataloader
   shuffle: false
-  num_workers: 8
+  num_workers: 6
   persistent_workers: true
   multiprocessing_context: spawn
-  # prefetch_factor: 2
+  prefetch_factor: 2
