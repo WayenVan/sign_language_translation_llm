@@ -6,7 +6,8 @@
         "model/**",
         "modules/**",
         "tests/**",
-        "data/**"
+        "data/**",
+        "misc/**",
       ],
       "basedpyright.analysis.exclude": [
         "**/node_modules/**",

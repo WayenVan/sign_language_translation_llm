@@ -3,7 +3,7 @@ import os
 import logging
 
 sys.path.append(
-    os.path.abspath(os.path.join(os.getcwd()))
+    os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 )  # NOTE: this is the initial cwd when runing the sciprt, the hydra will change the cwd to the output dir
 
 import hydra
@@ -19,6 +19,9 @@ from lightning.pytorch import callbacks
 from model.slt import SLTModel
 import cv2
 
+from misc.git_utils import save_git_info
+
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 logger = logging.getLogger(__name__)  # NOTE: lightning already setupo the logger for us
 cv2.setNumThreads(0)  # NOTE: set the number of threads to 0 to avoid cv2 error
 
@@ -61,6 +64,15 @@ def train(cfg: DictConfig) -> None:
         sync_batchnorm=True,
         precision="16-mixed",
     )
+
+    if t.is_global_zero:
+        # NOTE: save git info
+        save_git_info(
+            repo_path=project_root,
+            info_path=os.path.join(working_dir, "git_info"),
+        )
+
+    logger.info(f"Process in local rank {t.local_rank}, global rank {t.global_rank}")
 
     datamodule = instantiate(cfg.data.datamodule, cfg)
     model = SLTModel(cfg, vocab)

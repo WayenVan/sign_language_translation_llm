@@ -210,8 +210,8 @@ class SLTModel(LightningModule):
             self.log(loss_name, getattr(loss_outputs, loss_name), prog_bar=True)
 
         if self.debug:
-            logger.info(f"keywords_ids_in: {keywords_ids_in}")
-            logger.info(f"keywords_ids_out: {keywords_ids_out}")
+            logger.info(f"keywords_ids_in: {keywords_ids_in.cpu().tolist()}")
+            logger.info(f"keywords_ids_out: {keywords_ids_out.cpu().tolist()}")
 
         return loss_outputs.loss
 
