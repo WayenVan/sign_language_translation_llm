@@ -215,7 +215,7 @@ class SLTModel(LightningModule):
 
         return loss_outputs.loss
 
-    def on_train_epoch_end(self, outputs):
+    def on_train_epoch_end(self):
         """
         Called at the end of each training epoch.
         """

@@ -12,7 +12,7 @@ print(torch.cuda.device_count())
 huggingface_hub_token = os.environ.get("HUGGINGFACE_HUB_TOKEN")
 login(huggingface_hub_token)
 
-from transformers import AutoProcessor, Gemma3ForConditionalGeneration
+from transformers.models.auto.processing_auto import AutoProcessor, Gemma3ForConditionalGeneration
 
 # 输入文本
 #

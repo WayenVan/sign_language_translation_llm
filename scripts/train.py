@@ -8,12 +8,9 @@ sys.path.append(
 
 import hydra
 from hydra.utils import instantiate
-from omegaconf import DictConfig, OmegaConf
-
-from torch.cuda.amp.grad_scaler import GradScaler
+from omegaconf import DictConfig
 
 from lightning import Trainer
-from lightning.pytorch import plugins
 from lightning.pytorch import callbacks
 
 from model.slt import SLTModel
@@ -45,9 +42,9 @@ def train(cfg: DictConfig) -> None:
         callbacks.RichProgressBar(),
         callbacks.LearningRateMonitor("step", log_momentum=True),
         callbacks.ModelCheckpoint(
-            dirpath="checkpoints",
-            filename="epoch={epoch:02d}-wer={val_accu:.2f}",
-            monitor="val_wer",
+            dirpath="./",
+            filename="epoch={epoch:02d}-wer={val_token_level_accu:.2f}",
+            monitor="val_token_level_accu",
             mode="max",
             save_last=True,
         ),

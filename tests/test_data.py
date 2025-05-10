@@ -21,12 +21,8 @@ def test_dataset():
 
 
 def test_datamodule():
-    import polars as pl
-
     initialize(config_path="../configs")
     cfg = compose("test_train")
-    with open(cfg.data.vocab_file, "r", encoding="utf-8") as f:
-        vocab = [line.strip() for line in f if line.strip()]  # Remove empty lines
 
     datamodule = Ph14TDataModule(cfg)
     datamodule.setup("fit")
@@ -37,6 +33,32 @@ def test_datamodule():
         pass
 
 
+def test_data_validation():
+    import cv2
+
+    initialize(config_path="../configs")
+    cfg = compose("test_train")
+
+    del cfg.data.transforms.train.transforms[-2]
+    cfg.data.batch_size = 2
+
+    datamodule = Ph14TDataModule(cfg)
+    datamodule.setup("fit")
+    train_dataloader = datamodule.train_dataloader()
+    for batch in tqdm(train_dataloader):
+        video = batch["video"][0]
+        break
+
+    video = video.cpu().numpy().transpose(0, 2, 3, 1) * 255
+    for i in range(video.shape[0]):
+        f = cv2.cvtColor(video[i], cv2.COLOR_RGB2BGR)
+        cv2.imwrite(
+            f"/root/projects/slt_set_llms/outputs/visualization/{i}.jpg",
+            f.astype("uint8"),
+        )
+
+
 if __name__ == "__main__":
     # test_dataset()
-    test_datamodule()
+    # test_datamodule()
+    test_data_validation()

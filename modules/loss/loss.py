@@ -48,7 +48,7 @@ class Loss(nn.Module):
             mse_loss = F.mse_loss(
                 output.token_llm_features,
                 target_token_llm_features,
-                reduction="mean",
+                reduction="sum",
             )
             loss += mse_loss
 

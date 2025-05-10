@@ -1,0 +1,23 @@
+{
+  "exclude": [
+    "**/node_modules/**",
+    "**/__pycache__/**",
+    "**/.venv/**",
+    "**/.git/**",
+    "**/.tox/**",
+    "**/.mypy_cache/**",
+    "**/.pytest_cache/**",
+    "dataset",
+    "outputs"
+  ],
+  "include": [
+    "scripts/**",
+    "model/**",
+    "modules/**",
+    "tests/**",
+    "data/**",
+    "misc/**"
+  ],
+  "typeCheckingMode": "off",
+  "useLibraryCodeForTypes": false,
+}

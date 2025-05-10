@@ -1,5 +1,6 @@
 from .video import (
     RandomCropVideo,
+    CenterCropVideo,
     ResizeVideo,
     NormalizeVideo,
     ToTensorVideo,
@@ -7,6 +8,7 @@ from .video import (
 )
 
 __all__ = [
+    "CenterCropVideo",
     "RandomCropVideo",
     "ResizeVideo",
     "NormalizeVideo",
