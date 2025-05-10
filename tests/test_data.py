@@ -40,11 +40,12 @@ def test_data_validation():
     cfg = compose("test_train")
 
     del cfg.data.transforms.train.transforms[-2]
+    del cfg.data.transforms.val.transforms[-2]
     cfg.data.batch_size = 2
 
     datamodule = Ph14TDataModule(cfg)
     datamodule.setup("fit")
-    train_dataloader = datamodule.train_dataloader()
+    train_dataloader = datamodule.val_dataloader()
     for batch in tqdm(train_dataloader):
         video = batch["video"][0]
         break
@@ -53,7 +54,7 @@ def test_data_validation():
     for i in range(video.shape[0]):
         f = cv2.cvtColor(video[i], cv2.COLOR_RGB2BGR)
         cv2.imwrite(
-            f"/root/projects/slt_set_llms/outputs/visualization/{i}.jpg",
+            f"/root/projects/slt_set_llms/outputs/visualization_val/{i}.jpg",
             f.astype("uint8"),
         )
 

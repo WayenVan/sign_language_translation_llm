@@ -8,10 +8,11 @@ sys.path.append(
 
 import hydra
 from hydra.utils import instantiate
-from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf
 
 from lightning import Trainer
 from lightning.pytorch import callbacks
+from lightning.pytorch.loggers import WandbLogger
 
 from model.slt import SLTModel
 import cv2
@@ -30,7 +31,10 @@ def main(cfg: DictConfig) -> None:
 
 
 def train(cfg: DictConfig) -> None:
-    working_dir = hydra.core.hydra_config.HydraConfig.get().runtime.output_dir
+    hydra_config = hydra.core.hydra_config.HydraConfig.get()
+    working_dir = hydra_config.runtime.output_dir
+    config_name = hydra_config.job.config_name
+
     logger.info(f"Output directory: {working_dir}")
 
     # NOTE: load vocab
@@ -42,13 +46,20 @@ def train(cfg: DictConfig) -> None:
         callbacks.RichProgressBar(),
         callbacks.LearningRateMonitor("step", log_momentum=True),
         callbacks.ModelCheckpoint(
-            dirpath="./",
+            dirpath=working_dir,
             filename="epoch={epoch:02d}-wer={val_token_level_accu:.2f}",
             monitor="val_token_level_accu",
             mode="max",
             save_last=True,
         ),
     ]
+
+    # NOTE: set the logger
+    lt_logger = WandbLogger(
+        name=config_name,
+        project="sign-langauge-translation-llm",
+        config=OmegaConf.to_container(cfg, resolve=True),
+    )
 
     # NOTE: start training
     t = Trainer(
@@ -58,8 +69,10 @@ def train(cfg: DictConfig) -> None:
         callbacks=cbs,
         log_every_n_steps=50,
         max_epochs=cfg.max_epochs,
+        gradient_clip_val=0.5,  # NOTE: gradient clipping will be normed
         sync_batchnorm=True,
         precision="16-mixed",
+        logger=lt_logger,
     )
 
     if t.is_global_zero:
