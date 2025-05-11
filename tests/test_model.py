@@ -25,6 +25,7 @@ def test_slt_model():
             break
 
     batch = {
+        "ids": torch.tensor([0, 1]).cuda(),
         "names": kws,
         "keywords": kws,
         "video": torch.randn(2, 10, 3, 224, 224).cuda(),

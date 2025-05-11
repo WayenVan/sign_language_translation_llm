@@ -16,6 +16,7 @@ transforms:
         height: 224
         width: 224
       - _target_: data.transforms.NormalizeVideo
+        max_pixel_value: 1.0
       - _target_: data.transforms.ToTensorVideo
 
   val:
@@ -28,6 +29,7 @@ transforms:
         height: 224
         width: 224
       - _target_: data.transforms.NormalizeVideo
+        max_pixel_value: 1.0
       - _target_: data.transforms.ToTensorVideo
 
   test: null # NOTE: same as the val

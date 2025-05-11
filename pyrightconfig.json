@@ -16,7 +16,8 @@
     "modules/**",
     "tests/**",
     "data/**",
-    "misc/**"
+    "misc/**",
+    "analysis/**"
   ],
   "typeCheckingMode": "off",
   "useLibraryCodeForTypes": false,

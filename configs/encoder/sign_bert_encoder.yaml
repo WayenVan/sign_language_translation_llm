@@ -1,7 +1,0 @@
-_target_: modules.SignBertEncoder
-hidden_size: 1024
-num_attention_heads: 16
-intermediate_size: 2048
-num_layers: 6
-dropout: 0.1
-max_position_embeddings: 512

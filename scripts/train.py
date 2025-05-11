@@ -73,6 +73,8 @@ def train(cfg: DictConfig) -> None:
         sync_batchnorm=True,
         precision="16-mixed",
         logger=lt_logger,
+        # WARN: will slow down the training process, just for debug now
+        detect_anomaly=True,
     )
 
     if t.is_global_zero:

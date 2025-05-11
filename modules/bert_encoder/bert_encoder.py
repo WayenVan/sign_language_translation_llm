@@ -1,7 +1,8 @@
 import torch
 from torch import nn
 from typing import Optional
-from transformers.models.bert.modeling_bert import BertConfig, BertEncoder
+from transformers.models.bert.modeling_bert import BertConfig
+from .bert import BertEncoder
 
 
 class SignBertEncoder(nn.Module):
@@ -13,12 +14,13 @@ class SignBertEncoder(nn.Module):
         num_layers,
         dropout=0.1,
         max_position_embeddings=512,
+        shared_mlps: Optional[nn.Module] = None,
     ) -> None:
         super().__init__()
         self.llm_config = self._generate_config(
             hidden_size, num_attention_heads, intermediate_size, num_layers
         )
-        self.encoder = BertEncoder(self.llm_config)
+        self.encoder = BertEncoder(self.llm_config, shared_mlps=shared_mlps)
         self.position_embedding = nn.Embedding(max_position_embeddings, hidden_size)
 
     @staticmethod
@@ -48,7 +50,7 @@ class SignBertEncoder(nn.Module):
     def forward(
         self,
         x: torch.Tensor,
-        v_lengths: Optional[torch.Tensor] = None,
+        lengths: Optional[torch.Tensor] = None,
         output_attentions: Optional[bool] = False,
     ) -> torch.Tensor:
         """
@@ -56,10 +58,10 @@ class SignBertEncoder(nn.Module):
         @param v_lengths : (batch_size, seq_len)
         """
 
-        if v_lengths is not None:
+        if lengths is not None:
             # Create a mask for the padding tokens
             video_padding_mask = self.create_key_padding_mask(
-                v_lengths, max_len=x.size(1)
+                lengths, max_len=x.size(1)
             )
         else:
             video_padding_mask = None
@@ -82,7 +84,7 @@ class SignBertEncoder(nn.Module):
             x, attention_mask=attn_mask, output_attentions=output_attentions
         )
 
-        return outputs.last_hidden_state, v_lengths, video_padding_mask
+        return outputs.last_hidden_state, lengths, video_padding_mask
 
     @staticmethod
     def create_key_padding_mask(sequence_lengths, max_len=None):

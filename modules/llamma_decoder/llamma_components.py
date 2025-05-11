@@ -19,13 +19,17 @@ from transformers.cache_utils import DynamicCache
 
 
 class LlamaCrossDecoderLayer(nn.Module):
-    def __init__(self, llama_config: LlamaConfig, layer_idx: int):
+    def __init__(self, llama_config: LlamaConfig, layer_idx: int, shared_mlp=None):
         super().__init__()
         self.hidden_size = llama_config.hidden_size
 
         self.self_attn = LlamaAttention(config=llama_config, layer_idx=layer_idx)
 
-        self.mlp = LlamaMLP(llama_config)
+        if shared_mlp is not None:
+            self.mlp = shared_mlp
+        else:
+            self.mlp = LlamaMLP(llama_config)
+
         self.input_layernorm = LlamaRMSNorm(
             llama_config.hidden_size, eps=llama_config.rms_norm_eps
         )

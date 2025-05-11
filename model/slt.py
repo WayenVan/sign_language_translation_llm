@@ -1,6 +1,7 @@
 import torch
 from lightning import LightningModule
 from transformers import AutoTokenizer
+from transformers.cache_utils import DynamicCache
 from omegaconf import DictConfig
 from transformers.models.mistral3 import Mistral3ForConditionalGeneration
 from hydra.utils import instantiate
@@ -8,6 +9,9 @@ from torchmetrics import Accuracy
 from torch.optim import Optimizer
 from typing import Dict, Any
 import logging
+from typing import Optional
+from einops import rearrange
+
 
 logger = logging.getLogger(__name__)  # NOTE: lightning already setupo the logger for us
 
@@ -21,22 +25,18 @@ class SLTModel(LightningModule):
         self.llm_id = "mistralai/Mistral-Small-3.1-24B-Instruct-2503"
         self.vocab = vocab
         self.reverse_vocab = {word: i for i, word in enumerate(vocab)}
+
         self._create_tokenizer()
         self._create_llm_embedding_layer()
         self._create_vocab_convert_mapping()
+
         self.padding_idx = self.reverse_vocab[self.llm_tokenizer.pad_token]
         self.bos_idx = self.reverse_vocab[self.llm_tokenizer.bos_token]
         self.eos_idx = self.reverse_vocab[self.llm_tokenizer.eos_token]
 
-        self.visual_backbone = instantiate(cfg.visual_backbone)
-        self.encoder = instantiate(cfg.encoder)
-        self.decoder = instantiate(
-            cfg.decoder,
-            padding_idx=self.padding_idx,
-            bos_token_id=self.bos_idx,
-            eos_token_id=self.eos_idx,
-            vocab_size=len(vocab),
-        )
+        self._create_shared_encoder_decoder()
+        self.embedding_layer = instantiate(cfg.modules.embedding)
+
         self.loss = instantiate(cfg.loss)
 
         self.train_accu = Accuracy(
@@ -44,6 +44,22 @@ class SLTModel(LightningModule):
         )
         self.val_accu = Accuracy(
             task="multiclass", num_classes=len(vocab), ignore_index=self.padding_idx
+        )
+
+    def _create_shared_encoder_decoder(self):
+        shared_mlps = []
+        for i in range(self.cfg.modules.num_layers):
+            shared_mlps.append(instantiate(self.cfg.modules.shared_mlp))
+
+        self.visual_backbone = instantiate(self.cfg.modules.visual_backbone)
+        self.encoder = instantiate(self.cfg.modules.encoder, shared_mlps=shared_mlps)
+        self.decoder = instantiate(
+            self.cfg.modules.decoder,
+            padding_idx=self.padding_idx,
+            bos_token_id=self.bos_idx,
+            eos_token_id=self.eos_idx,
+            vocab_size=len(self.vocab),
+            shared_mlps=shared_mlps,
         )
 
     def _create_tokenizer(self):
@@ -57,7 +73,7 @@ class SLTModel(LightningModule):
             device_map="cpu",
         ).eval()
 
-        self.llm_embedding_layer = model.get_input_embeddings()
+        self.llm_embedding_layer = model.get_input_embeddings().to(torch.float32)
         for param in self.llm_embedding_layer.parameters():
             param.requires_grad = False
         self.llm_hidden_size = self.llm_embedding_layer.embedding_dim
@@ -178,10 +194,11 @@ class SLTModel(LightningModule):
             keywords_lengths,
         ) = self.preprocess_train_keywords(keywords)
 
+        inputs_embeds, pred_llm_embeddings = self.embedding_layer(keywords_ids_in)
         v_feats, v_length = self.visual_backbone(video, video_length)
         v_feats, v_length, video_padding_mask = self.encoder(v_feats, v_length)
         decoder_outputs = self.decoder(
-            input_ids=keywords_ids_in,
+            inputs_embeds=inputs_embeds,
             visual_hidden_states=v_feats,
             attention_mask=mask,
             video_padding_mask=video_padding_mask,
@@ -192,6 +209,7 @@ class SLTModel(LightningModule):
         )
         loss_outputs = self.loss(
             decoder_outputs,
+            pred_llm_embeddings,
             target_token_llm_features,
             keywords_ids_out,
             mask,
@@ -237,18 +255,16 @@ class SLTModel(LightningModule):
             keywords_lengths,
         ) = self.preprocess_train_keywords(keywords)
 
+        inputs_embeds, pred_llm_embeddings = self.embedding_layer(keywords_ids_in)
         v_feats, v_length = self.visual_backbone(video, video_length)
         v_feats, v_length, video_padding_mask = self.encoder(v_feats, v_length)
         decoder_outputs = self.decoder(
-            input_ids=keywords_ids_in,
+            inputs_embeds=inputs_embeds,
             visual_hidden_states=v_feats,
             attention_mask=mask,
             video_padding_mask=video_padding_mask,
         )
 
-        target_token_llm_features = self.llm_embedding_layer(
-            keywords_llm_in.input_ids.to(self.device)
-        )
         # NOTE: we don't need to calculate the loss in validation step, but maybe we need?
         # loss_outputs = self.loss(
         #     decoder_outputs,
@@ -279,21 +295,7 @@ class SLTModel(LightningModule):
         opt: Optimizer = instantiate(
             self.cfg.engine.optimizer,
             [
-                {
-                    "params": filter(
-                        lambda p: p.requires_grad, self.visual_backbone.parameters()
-                    )
-                },
-                {
-                    "params": filter(
-                        lambda p: p.requires_grad, self.encoder.parameters()
-                    )
-                },
-                {
-                    "params": filter(
-                        lambda p: p.requires_grad, self.decoder.parameters()
-                    )
-                },
+                {"params": filter(lambda p: p.requires_grad, self.parameters())},
             ],
         )
         scheduler = instantiate(self.cfg.engine.lr_scheduler, opt)
@@ -303,6 +305,46 @@ class SLTModel(LightningModule):
         for key in state_dict:
             if key.startswith("llm_embedding_layer"):
                 del state_dict[key]
+
+    def generate(
+        self,
+        visual_hidden_states: torch.Tensor,
+        visual_padding_mask: Optional[torch.Tensor] = None,
+        max_length: int = 10,
+    ) -> torch.LongTensor:
+        B = visual_hidden_states.shape[0]
+        device = visual_hidden_states.device
+        kv_cache = DynamicCache()
+        bos = torch.tensor([self.bos_token_id] * B, device=device)
+        bos = rearrange(bos, "b -> b 1")
+
+        eos_flags = [False] * B
+        ret = []
+        output = None
+        for i in range(max_length):
+            if i == 0:
+                input_ids = bos
+            else:
+                input_ids = output[:, -1:]
+
+            outputs = self(
+                input_ids=input_ids,
+                visual_hidden_states=visual_hidden_states,
+                visual_padding_mask=visual_padding_mask,
+                past_key_values=kv_cache,
+                use_cache=True,
+            )
+            output = outputs.logits.argmax(-1)[:, -1:]
+            ret.append(output)
+
+            for i, idx in enumerate(output[:, -1].cpu().tolist()):
+                if idx == self.eos_token_id:
+                    eos_flags[i] = True
+
+            if all(eos_flags):
+                break
+
+        return torch.cat(ret, dim=1)
 
 
 if __name__ == "__main__":

@@ -1,3 +1,0 @@
-_target_: modules.TimmVisualEncoder
-backbone_id: "resnet18"
-out_channels: 1024

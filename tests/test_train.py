@@ -1,56 +1,115 @@
-import os
 import sys
-import numpy as np
+import os
+import logging
 
-sys.path.append(".")
+sys.path.append(
+    os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+)  # NOTE: this is the initial cwd when runing the sciprt, the hydra will change the cwd to the output dir
+
+import hydra
+from hydra.utils import instantiate
+from omegaconf import DictConfig, OmegaConf
+
+from torch import Tensor
+from torch.optim import Optimizer
+
+from typing import Any, Dict, List
+
+from lightning import Trainer
+from lightning.pytorch import callbacks
+from lightning.pytorch.loggers import WandbLogger
+import lightning.pytorch as pl
+
+from model.slt import SLTModel
+import cv2
+
+from misc.git_utils import save_git_info
+
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+logger = logging.getLogger(__name__)  # NOTE: lightning already setupo the logger for us
+cv2.setNumThreads(0)  # NOTE: set the number of threads to 0 to avoid cv2 error
 
 
-def test_train():
-    import polars as pl
-    from model.slt import SLTModel
-    from hydra import compose, initialize
-    import torch
-    from lightning import Trainer
-    from lightning.pytorch import plugins
-    from torch.cuda.amp.grad_scaler import GradScaler
-    from hydra.utils import instantiate
-    import cv2
+# NOTE: the hydra appp only inisitalize once
+@hydra.main(config_path="../configs", config_name="test_train", version_base="1.3.2")
+def main(cfg: DictConfig) -> None:
+    train(cfg)
 
-    cv2.setNumThreads(0)
 
-    initialize(config_path="../configs")
-    cfg = compose("test_train")
+def train(cfg: DictConfig) -> None:
+    hydra_config = hydra.core.hydra_config.HydraConfig.get()
+    working_dir = hydra_config.runtime.output_dir
+    config_name = hydra_config.job.config_name
 
-    with open("outputs/keywords_vocab.txt", "r", encoding="utf-8") as f:
+    logger.info(f"Output directory: {working_dir}")
+
+    # NOTE: load vocab
+    with open(cfg.data.vocab_file, "r", encoding="utf-8") as f:
         vocab = [line.strip() for line in f if line.strip()]  # Remove empty lines
 
+    # NOTE: define callbacks for trainer
+    cbs = [
+        callbacks.RichProgressBar(),
+        DebugCallback(),
+    ]
+
+    # NOTE: start training
     t = Trainer(
         accelerator="gpu",
         strategy="ddp",
         devices=[0, 1],
-        # devices=[0],
-        callbacks=[],
+        callbacks=cbs,
         log_every_n_steps=50,
-        max_epochs=50,
+        max_steps=4,
+        max_epochs=cfg.max_epochs,
+        gradient_clip_val=0.5,  # NOTE: gradient clipping will be normed
+        gradient_clip_algorithm="value",
         sync_batchnorm=True,
-        gradient_clip_val=1.0,
-        num_sanity_val_steps=0,
-        plugins=[
-            plugins.MixedPrecision(
-                precision="16-mixed",
-                device="cuda",
-                scaler=GradScaler(
-                    growth_interval=100,
-                ),
-            ),
-        ],
+        precision="16-mixed",
+        logger=None,
+        # detect_anomaly=True,
     )
+
+    logger.info(f"Process in local rank {t.local_rank}, global rank {t.global_rank}")
 
     datamodule = instantiate(cfg.data.datamodule, cfg)
     model = SLTModel(cfg, vocab)
-
     t.fit(model, datamodule=datamodule)
 
 
+class DebugCallback(callbacks.Callback):
+    def on_train_batch_start(
+        self,
+        trainer: "pl.Trainer",
+        pl_module: "pl.LightningModule",
+        batch: Any,
+        batch_idx: int,
+    ) -> None:
+        vdieo = batch["video"]
+        logging.info(
+            f"Video shape: {vdieo.shape}, mean: {vdieo.mean()}, std: {vdieo.std()}"
+        )
+        return super().on_train_batch_start(trainer, pl_module, batch, batch_idx)
+
+    def on_before_optimizer_step(
+        self,
+        trainer: "pl.Trainer",
+        pl_module: "pl.LightningModule",
+        optimizer: Optimizer,
+    ) -> None:
+        for name, param in pl_module.named_parameters():
+            if name.startswith("llm_embedding_layer"):
+                continue
+
+            logging.info(f"Param {name} has  mean: {param.mean()}, std: {param.std()}")
+            logging.info(
+                f"Param {name} has grad mean: {param.grad.mean()}, std: {param.grad.std()}"
+            )
+            logging.info("-------------------------------------------------")
+        logging.info("NextStep-------------------------------------------------")
+        # trainer.should_stop = True
+        return
+
+
 if __name__ == "__main__":
-    test_train()
+    main()

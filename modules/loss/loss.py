@@ -15,7 +15,8 @@ class Loss(nn.Module):
 
     def forward(
         self,
-        output,
+        decoder_output,
+        pred_token_llm_features,
         target_token_llm_features,
         target_tokens,
         target_token_mask,
@@ -24,7 +25,7 @@ class Loss(nn.Module):
         """
         @param output: The output from the decoder, namedtuple containing:
             - logits: The logits from the decoder [batch_size, seq_len, vocab_size]
-            - token_llm_features: The token features from the LLM [batch_size, seq_len, llm_feature_dim]
+        @param pred_token_llm_features: The token features from the LLM [batch_size, seq_len, llm_feature_dim]
         @param target_token_llm_features: The target token features from the LLM [batch_size, seq_len, llm_feature_dim]
         @param target_tokens: The idx of target tokens [batch_size, seq_len]
         @param target_token_mask: The mask for the target tokens [batch_size, seq_len]
@@ -35,7 +36,7 @@ class Loss(nn.Module):
         mse_loss = 0.0
 
         if self.ce_weight > 0:
-            prob = F.log_softmax(output.logits, dim=-1)
+            prob = F.log_softmax(decoder_output.logits, dim=-1)
             ce_loss = F.nll_loss(
                 prob.flatten(0, 1),
                 target_tokens.flatten(0, 1),
@@ -46,7 +47,7 @@ class Loss(nn.Module):
 
         if self.mse_weight > 0:
             mse_loss = F.mse_loss(
-                output.token_llm_features,
+                pred_token_llm_features,
                 target_token_llm_features,
                 reduction="sum",
             )
