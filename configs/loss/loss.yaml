@@ -1,3 +1,4 @@
 _target_: modules.Loss
 ce_weight: 1.0
 mse_weight: 1.0
+cross_model_weight: 1.0

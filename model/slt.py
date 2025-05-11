@@ -9,7 +9,7 @@ from torchmetrics import Accuracy
 from torch.optim import Optimizer
 from typing import Dict, Any
 import logging
-from typing import Optional
+from typing import Optional, List
 from einops import rearrange
 
 
@@ -123,22 +123,52 @@ class SLTModel(LightningModule):
 
     def forward(
         self,
-        video,
+        video: torch.Tensor,
+        keywords: List[str],
         video_length=None,
-        max_length=None,
+        inference=False,
     ):
         """
         Forward pass through the model.
         """
+        (
+            keywords_ids_in,
+            keywords_llm_in,
+            keywords_ids_out,
+            keyword_attn_mask,
+            keywords_lengths,
+        ) = self.preprocess_train_keywords(keywords)
 
+        token_embeddings, pred_llm_embeddings = self.embedding_layer(keywords_ids_in)
         v_feats, v_length = self.visual_backbone(video, video_length)
         v_feats, v_length, video_padding_mask = self.encoder(v_feats, v_length)
+        tx_feats, tx_length, tx_padding_mask = (
+            self.encoder(  # NOTE: remove the first <bos> token
+                token_embeddings[:, 1:], keywords_lengths - 1
+            )
+        )  # remove the bos token
         decoder_outputs = self.decoder(
+            inputs_embeds=token_embeddings,
             visual_hidden_states=v_feats,
+            attention_mask=keyword_attn_mask,
             video_padding_mask=video_padding_mask,
-            max_length=max_length,
         )
-        return decoder_outputs
+
+        target_token_llm_features = self.llm_embedding_layer(
+            keywords_llm_in.input_ids.to(self.device)
+        )
+        return (
+            decoder_outputs,
+            v_feats,
+            v_length,
+            tx_feats,
+            tx_length,
+            pred_llm_embeddings,
+            target_token_llm_features,
+            keywords_ids_out,
+            keywords_ids_in,
+            keywords_lengths,
+        )
 
     def preprocess_train_keywords(self, keywords):
         keywords_ids_in = [
@@ -187,32 +217,27 @@ class SLTModel(LightningModule):
         video_length = batch["video_length"].to(self.device)
 
         (
-            keywords_ids_in,
-            keywords_llm_in,
-            keywords_ids_out,
-            mask,
-            keywords_lengths,
-        ) = self.preprocess_train_keywords(keywords)
-
-        inputs_embeds, pred_llm_embeddings = self.embedding_layer(keywords_ids_in)
-        v_feats, v_length = self.visual_backbone(video, video_length)
-        v_feats, v_length, video_padding_mask = self.encoder(v_feats, v_length)
-        decoder_outputs = self.decoder(
-            inputs_embeds=inputs_embeds,
-            visual_hidden_states=v_feats,
-            attention_mask=mask,
-            video_padding_mask=video_padding_mask,
-        )
-
-        target_token_llm_features = self.llm_embedding_layer(
-            keywords_llm_in.input_ids.to(self.device)
-        )
-        loss_outputs = self.loss(
             decoder_outputs,
+            v_feats,
+            v_length,
+            tx_feats,
+            tx_length,
             pred_llm_embeddings,
             target_token_llm_features,
             keywords_ids_out,
-            mask,
+            keywords_ids_in,
+            keywords_lengths,
+        ) = self.forward(video, keywords, video_length)
+
+        loss_outputs = self.loss(
+            decoder_outputs.logits,
+            tx_feats,
+            v_feats,
+            pred_llm_embeddings,
+            tx_length,
+            v_length,
+            target_token_llm_features,
+            keywords_ids_out,
             self.padding_idx,
         )
 
@@ -247,24 +272,6 @@ class SLTModel(LightningModule):
         video = batch["video"].to(self.device)
         video_length = batch["video_length"].to(self.device)
 
-        (
-            keywords_ids_in,
-            keywords_llm_in,
-            keywords_ids_out,
-            mask,
-            keywords_lengths,
-        ) = self.preprocess_train_keywords(keywords)
-
-        inputs_embeds, pred_llm_embeddings = self.embedding_layer(keywords_ids_in)
-        v_feats, v_length = self.visual_backbone(video, video_length)
-        v_feats, v_length, video_padding_mask = self.encoder(v_feats, v_length)
-        decoder_outputs = self.decoder(
-            inputs_embeds=inputs_embeds,
-            visual_hidden_states=v_feats,
-            attention_mask=mask,
-            video_padding_mask=video_padding_mask,
-        )
-
         # NOTE: we don't need to calculate the loss in validation step, but maybe we need?
         # loss_outputs = self.loss(
         #     decoder_outputs,
@@ -273,6 +280,18 @@ class SLTModel(LightningModule):
         #     mask,
         #     self.padding_idx,
         # )
+        (
+            decoder_outputs,
+            v_feats,
+            v_length,
+            tx_feats,
+            tx_length,
+            pred_llm_embeddings,
+            target_token_llm_features,
+            keywords_ids_out,
+            keywords_ids_in,
+            keywords_lengths,
+        ) = self.forward(video, keywords, video_length)
 
         # Calculate the logits and target IDs for token-level accuracy
         self.val_accu.update(

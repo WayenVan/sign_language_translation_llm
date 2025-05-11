@@ -28,8 +28,8 @@ def test_slt_model():
         "ids": torch.tensor([0, 1]).cuda(),
         "names": kws,
         "keywords": kws,
-        "video": torch.randn(2, 10, 3, 224, 224).cuda(),
-        "video_length": torch.tensor([10, 8]).cuda(),
+        "video": torch.randn(2, 20, 3, 224, 224).cuda(),
+        "video_length": torch.tensor([20, 16]).cuda(),
     }
     engines = model.configure_optimizers()
 
