@@ -112,7 +112,7 @@ class LlamaCrossDecoder(LlamaPreTrainedModel):
             rope_theta=10000.0,
             rope_scaling=None,
             attention_bias=False,
-            attention_dropout=0.0,
+            attention_dropout=0.3,
             mlp_bias=False,
             num_key_value_heads=None,
             pretraining_tp=None,

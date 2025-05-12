@@ -1,6 +1,7 @@
 import sys
 import os
 import logging
+import torch
 
 sys.path.append(
     os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -60,10 +61,10 @@ def train(cfg: DictConfig) -> None:
         devices=[0, 1],
         callbacks=cbs,
         log_every_n_steps=50,
-        max_steps=4,
+        # max_steps=
         max_epochs=cfg.max_epochs,
-        gradient_clip_val=0.5,  # NOTE: gradient clipping will be normed
-        gradient_clip_algorithm="value",
+        gradient_clip_val=1.0,  # NOTE: gradient clipping will be normed
+        # gradient_clip_algorithm="value",
         sync_batchnorm=True,
         precision="16-mixed",
         logger=None,
@@ -85,10 +86,11 @@ class DebugCallback(callbacks.Callback):
         batch: Any,
         batch_idx: int,
     ) -> None:
-        vdieo = batch["video"]
-        logging.info(
-            f"Video shape: {vdieo.shape}, mean: {vdieo.mean()}, std: {vdieo.std()}"
-        )
+        # vdieo = batch["video"]
+        # logging.info(
+        #     f"Video shape: {vdieo.shape}, mean: {vdieo.mean()}, std: {vdieo.std()}"
+        # )
+        # val_steps = 0
         return super().on_train_batch_start(trainer, pl_module, batch, batch_idx)
 
     def on_before_optimizer_step(
@@ -100,13 +102,14 @@ class DebugCallback(callbacks.Callback):
         for name, param in pl_module.named_parameters():
             if name.startswith("llm_embedding_layer"):
                 continue
-
-            logging.info(f"Param {name} has  mean: {param.mean()}, std: {param.std()}")
-            logging.info(
-                f"Param {name} has grad mean: {param.grad.mean()}, std: {param.grad.std()}"
-            )
-            logging.info("-------------------------------------------------")
-        logging.info("NextStep-------------------------------------------------")
+            if torch.isnan(param).any():
+                logging.info(
+                    f"Param {name} has  mean: {param.mean()}, std: {param.std()}"
+                )
+            if torch.isnan(param.grad).any():
+                logging.info(
+                    f"Param {name} has grad mean: {param.grad.mean()}, std: {param.grad.std()}"
+                )
         # trainer.should_stop = True
         return
 

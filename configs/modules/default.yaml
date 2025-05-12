@@ -4,6 +4,7 @@ visual_backbone:
   _target_: modules.TimmVisualEncoder
   backbone_id: "resnet18"
   out_channels: 1024
+  dropout_s: 0.5
 
 decoder:
   _target_: modules.LlamaCrossDecoder
@@ -17,7 +18,6 @@ encoder:
   hidden_size: 1024
   num_attention_heads: 16
   num_layers: ${modules.num_layers}
-  dropout: 0.1
   max_position_embeddings: 512
   intermediate_size: 2048 # WARN: not use, because shared_mlp
 
@@ -26,9 +26,11 @@ embedding:
   num_idx: 2696
   hidden_states: 1024
   llm_hidden_states: 5120
+  dropout: 0.5
 
 shared_mlp:
   _target_: modules.LlamaMLP
   hidden_size: 1024
   intermediate_size: 2048
   act_fn: silu
+  dropout: 0.5

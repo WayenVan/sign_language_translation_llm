@@ -11,7 +11,6 @@ class TimmVisualEncoder(nn.Module):
         backbone_id,
         out_channels,
         dropout_s=0.5,
-        drop_path_rate_s=0.1,
         dropout_t=0.5,
         **kwargs,
     ):
@@ -21,10 +20,9 @@ class TimmVisualEncoder(nn.Module):
             pretrained=True,
             num_classes=0,
             in_chans=3,
-            drop_rate=dropout_s,
-            drop_path_rate=drop_path_rate_s,
             **kwargs,
         )
+        self.dropout_s = nn.Dropout(dropout_s)
         self.backbone_out_feautres = self.backbone.num_features
         self.tconv = TemporalConv1D(
             input_size=self.backbone_out_feautres,
@@ -45,6 +43,7 @@ class TimmVisualEncoder(nn.Module):
         B, T, C, H, W = x.shape
         x = rearrange(x, "b t c h w -> (b t) c h w").contiguous()
         visual_features = self.backbone(x)
+        visual_features = self.dropout_s(visual_features)
         visual_features = rearrange(visual_features, "(b t) c -> b c t", b=B)
         visual_features, v_length = self.tconv(visual_features, v_length)
         visual_features = rearrange(visual_features, "b c t -> b t c")

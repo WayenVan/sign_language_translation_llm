@@ -58,7 +58,7 @@ class Loss(nn.Module):
             mse_loss = F.mse_loss(
                 pred_token_llm_features,
                 target_token_llm_features,
-                reduction="sum",
+                reduction="mean",
             )
             loss += mse_loss
 
@@ -74,9 +74,9 @@ class Loss(nn.Module):
 
         return self.LossOutputs(
             loss=loss,
-            ce_loss=ce_loss,
-            mse_loss=mse_loss,
-            cross_modal_loss=cross_modal_loss,
+            ce_loss=ce_loss * self.ce_weight,
+            mse_loss=mse_loss * self.mse_weight,
+            cross_modal_loss=cross_modal_loss * self.cross_model_weight,
         )
 
     LossOutputs = namedtuple(
@@ -144,8 +144,8 @@ def cross_modal_attention(frame_embs, word_embs, frame_length=None, word_length=
     attended_word_feats = torch.matmul(attn_frame_to_word, word_embs)  # [B, T, D]
 
     loss = masked_mse_loss(
-        attended_frame_feats, word_embs, word_length_mask
-    ) + masked_mse_loss(attended_word_feats, frame_embs, frame_length_mask)
+        attended_frame_feats, word_embs.detach(), word_length_mask
+    ) + masked_mse_loss(attended_word_feats, frame_embs.detach(), frame_length_mask)
 
     return loss
 

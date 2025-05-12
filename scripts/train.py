@@ -13,6 +13,8 @@ from omegaconf import DictConfig, OmegaConf
 from lightning import Trainer
 from lightning.pytorch import callbacks
 from lightning.pytorch.loggers import WandbLogger
+import lightning.pytorch as pl
+import torch
 
 from model.slt import SLTModel
 import cv2
@@ -52,6 +54,7 @@ def train(cfg: DictConfig) -> None:
             mode="max",
             save_last=True,
         ),
+        DebugCallback(),
     ]
 
     # NOTE: set the logger
@@ -69,12 +72,13 @@ def train(cfg: DictConfig) -> None:
         callbacks=cbs,
         log_every_n_steps=50,
         max_epochs=cfg.max_epochs,
-        gradient_clip_val=0.5,  # NOTE: gradient clipping will be normed
+        gradient_clip_val=1.0,  # NOTE: gradient clipping will be normed
+        gradient_clip_algorithm="value",
         sync_batchnorm=True,
         precision="16-mixed",
         logger=lt_logger,
         # WARN: will slow down the training process, just for debug now
-        detect_anomaly=True,
+        # detect_anomaly=True,
     )
 
     if t.is_global_zero:
@@ -89,6 +93,28 @@ def train(cfg: DictConfig) -> None:
     datamodule = instantiate(cfg.data.datamodule, cfg)
     model = SLTModel(cfg, vocab)
     t.fit(model, datamodule=datamodule)
+
+
+class DebugCallback(callbacks.Callback):
+    def on_before_optimizer_step(
+        self,
+        trainer: "pl.Trainer",
+        pl_module: "pl.LightningModule",
+        optimizer: any,
+    ) -> None:
+        for name, param in pl_module.named_parameters():
+            if name.startswith("llm_embedding_layer"):
+                continue
+            if torch.isnan(param).any():
+                logger.warning(
+                    f"Param {name} has  mean: {param.mean()}, std: {param.std()}"
+                )
+            if torch.isnan(param.grad).any():
+                logger.warning(
+                    f"Param {name} has grad mean: {param.grad.mean()}, std: {param.grad.std()}"
+                )
+        # trainer.should_stop = True
+        return
 
 
 if __name__ == "__main__":

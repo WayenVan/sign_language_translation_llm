@@ -9,6 +9,6 @@ hydra:
   run:
     dir: outputs/${hydra.job.name}/${now:%Y-%m-%d_%H-%M-%S}
 
-max_epochs: 50
+max_epochs: 100
 debug: True
 devices: [0, 1]

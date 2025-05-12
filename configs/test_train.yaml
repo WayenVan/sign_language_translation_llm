@@ -5,6 +5,9 @@ defaults:
 debug: False
 max_epochs: 100
 
+loss:
+  cross_model_weight: 1e3
+
 engine:
   lr_scheduler:
     step_size: 50

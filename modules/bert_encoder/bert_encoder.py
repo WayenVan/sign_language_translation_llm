@@ -12,7 +12,6 @@ class SignBertEncoder(nn.Module):
         num_attention_heads,
         intermediate_size,
         num_layers,
-        dropout=0.1,
         max_position_embeddings=512,
         shared_mlps: Optional[nn.Module] = None,
     ) -> None:
@@ -34,16 +33,16 @@ class SignBertEncoder(nn.Module):
             intermediate_size=intermediate_size,
             hidden_act="gelu",
             position_embedding_type="absolute",
-            hidden_dropout_prob=0.1,
-            attention_probs_dropout_prob=0.1,
+            hidden_dropout_prob=0.3,
+            attention_probs_dropout_prob=0.3,
             layer_norm_eps=1e-12,
-            pad_token_id=None,
-            max_position_embeddings=None,
-            type_vocab_size=None,
             initializer_range=0.02,
             use_cache=False,
             classifier_dropout=None,
             vocab_size=None,
+            pad_token_id=None,
+            max_position_embeddings=None,
+            type_vocab_size=None,
         )
         return config
 
