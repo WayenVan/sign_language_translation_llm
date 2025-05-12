@@ -20,6 +20,7 @@ from model.slt import SLTModel
 import cv2
 
 from misc.git_utils import save_git_info
+from typing import Any, Dict
 
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 logger = logging.getLogger(__name__)  # NOTE: lightning already setupo the logger for us
@@ -27,7 +28,7 @@ cv2.setNumThreads(0)  # NOTE: set the number of threads to 0 to avoid cv2 error
 
 
 # NOTE: the hydra appp only inisitalize once
-@hydra.main(config_path="../configs", config_name="test_train", version_base="1.3.2")
+@hydra.main(config_path="../configs", config_name="initial_train", version_base="1.3.2")
 def main(cfg: DictConfig) -> None:
     train(cfg)
 
@@ -53,15 +54,18 @@ def train(cfg: DictConfig) -> None:
             monitor="val_token_level_accu",
             mode="max",
             save_last=True,
+            save_weights_only=True,
         ),
         DebugCallback(),
     ]
 
     # NOTE: set the logger
+    wdb_config = OmegaConf.to_container(cfg, resolve=True)
+    wdb_config["output_dir"] = working_dir
     lt_logger = WandbLogger(
         name=config_name,
         project="sign-langauge-translation-llm",
-        config=OmegaConf.to_container(cfg, resolve=True),
+        config=wdb_config,
     )
 
     # NOTE: start training
@@ -96,24 +100,60 @@ def train(cfg: DictConfig) -> None:
 
 
 class DebugCallback(callbacks.Callback):
+    def __init__(self):
+        super().__init__()
+        self.current_train_batch = None
+
+    def on_train_batch_start(
+        self,
+        trainer: "pl.Trainer",
+        pl_module: "pl.LightningModule",
+        batch: Any,
+        batch_idx: int,
+    ) -> None:
+        self.current_train_batch = batch
+
+    def on_before_backward(
+        self, trainer: "pl.Trainer", pl_module: "pl.LightningModule", loss: torch.Tensor
+    ) -> None:
+        # NOTE: check the loss
+        if torch.isnan(loss).any():
+            video = self.current_train_batch["video"]
+            ids = self.current_train_batch["ids"]
+
+            logger.warning(f"Loss is NaN: {loss}")
+            logger.warning(
+                f"Video shape: {video.shape}, mean: {video.mean()}, std: {video.std()}"
+            )
+            logger.warning(f"input_ids: {ids}")
+            trainer.should_stop = True
+
     def on_before_optimizer_step(
         self,
         trainer: "pl.Trainer",
         pl_module: "pl.LightningModule",
         optimizer: any,
     ) -> None:
+        nan_flag = False
         for name, param in pl_module.named_parameters():
+            global_step = trainer.global_step
             if name.startswith("llm_embedding_layer"):
                 continue
             if torch.isnan(param).any():
+                nan_flag = True
                 logger.warning(
-                    f"Param {name} has  mean: {param.mean()}, std: {param.std()}"
+                    f"In Step {global_step}, Param {name} has mean: {param.mean()}, std: {param.std()}"
                 )
             if torch.isnan(param.grad).any():
+                nan_flag = True
                 logger.warning(
-                    f"Param {name} has grad mean: {param.grad.mean()}, std: {param.grad.std()}"
+                    f"In Step {global_step}, Param {name} has grad mean: {param.grad.mean()}, std: {param.grad.std()}"
                 )
-        # trainer.should_stop = True
+        if nan_flag and global_step >= 1000:
+            logger.warning(
+                "find nan and the global step is larger than 1000, stop the training"
+            )
+            trainer.should_stop = True
         return
 
 
