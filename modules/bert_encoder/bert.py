@@ -1,3 +1,7 @@
+"""
+The BertEncoder which support shared mlp and cross attention
+"""
+
 from torch import nn
 from transformers.models.bert.modeling_bert import (
     BertAttention,
@@ -32,7 +36,8 @@ class BertLayer(nn.Module):
             )
 
         if shared_mlp is not None:
-            self.shared_mlps = shared_mlp
+            self.shared_mlp = shared_mlp
+            self.mlp_norm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
         else:
             self.intermediate = BertIntermediate(config)
             self.output = BertOutput(config)
@@ -99,7 +104,7 @@ class BertLayer(nn.Module):
             cross_attn_present_key_value = cross_attention_outputs[-1]
             present_key_value = present_key_value + cross_attn_present_key_value
 
-        if self.shared_mlps is not None:
+        if self.shared_mlp is not None:
             layer_output = apply_chunking_to_forward(
                 self.feed_forward_chunk_shared,
                 self.chunk_size_feed_forward,
@@ -128,7 +133,8 @@ class BertLayer(nn.Module):
         return layer_output
 
     def feed_forward_chunk_shared(self, attention_output):
-        return self.shared_mlps(attention_output)
+        ff_out = self.shared_mlp(attention_output)
+        return self.mlp_norm(ff_out + attention_output)
 
 
 class BertEncoder(nn.Module):

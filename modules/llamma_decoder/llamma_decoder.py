@@ -107,7 +107,7 @@ class LlamaCrossDecoder(LlamaPreTrainedModel):
             hidden_act="silu",
             max_position_embeddings=2048,
             initializer_range=0.02,
-            rms_norm_eps=1e-6,
+            rms_norm_eps=1e-5,
             tie_word_embeddings=False,
             rope_theta=10000.0,
             rope_scaling=None,

@@ -35,7 +35,7 @@ class SignBertEncoder(nn.Module):
             position_embedding_type="absolute",
             hidden_dropout_prob=0.3,
             attention_probs_dropout_prob=0.3,
-            layer_norm_eps=1e-12,
+            layer_norm_eps=1e-5,
             initializer_range=0.02,
             use_cache=False,
             classifier_dropout=None,
