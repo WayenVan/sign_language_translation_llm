@@ -11,3 +11,5 @@ loss:
 engine:
   lr_scheduler:
     step_size: 50
+  optmizer:
+    lr: 1e-4

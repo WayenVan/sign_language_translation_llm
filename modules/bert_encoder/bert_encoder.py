@@ -12,7 +12,7 @@ class SignBertEncoder(nn.Module):
         num_attention_heads,
         intermediate_size,
         num_layers,
-        max_position_embeddings=512,
+        max_position_embeddings=1024,
         shared_mlps: Optional[nn.Module] = None,
     ) -> None:
         super().__init__()

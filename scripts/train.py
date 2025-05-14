@@ -149,11 +149,11 @@ class DebugCallback(callbacks.Callback):
                 logger.warning(
                     f"In Step {global_step}, Param {name} has grad mean: {param.grad.mean()}, std: {param.grad.std()}"
                 )
-        if nan_flag and global_step >= 1000:
-            logger.warning(
-                "find nan and the global step is larger than 1000, stop the training"
-            )
-            trainer.should_stop = True
+        # if nan_flag and global_step >= 1000:
+        #     logger.warning(
+        #         "find nan and the global step is larger than 1000, stop the training"
+        #     )
+        #     trainer.should_stop = True
         return
 
 

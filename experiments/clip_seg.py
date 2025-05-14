@@ -20,4 +20,3 @@ inputs = {k: v.cuda() for k, v in inputs.items()}
 
 outputs = model(**inputs)
 logits = outputs.logits
-probas = logits.softmax(dim=1)  # (batch_size, num_labels)
