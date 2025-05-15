@@ -4,7 +4,7 @@ import os
 sys.path.append(".")
 from data.ph14t.ph14t_index import Ph14TIndex
 import torch
-from transformers import AutoTokenizer, AutoModelForCausalLM
+from transformers import AutoTokenizer, AutoModelForCausalLM, AutoConfig
 from transformers.models.gemma3 import Gemma3ForCausalLM
 from transformers.models.bert import BertModel
 from huggingface_hub import login
@@ -23,6 +23,10 @@ model = BertModel.from_pretrained(
     torch_dtype=torch.float16,
 ).eval()
 
+config = AutoConfig.from_pretrained(
+    "dbmdz/bert-base-german-europeana-cased",
+)
+
 for name, module in model.named_modules():
     print(name)
 
@@ -37,5 +41,5 @@ for id in index.ids[:2]:
         + "\n"
         + "the translation is:\n"
     )
-    output = tokenizer.tokenize(translation)
+    output = tokenizer(translation)
     print("output: " + str(output))

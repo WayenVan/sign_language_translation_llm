@@ -9,22 +9,19 @@ sys.path.append(
 
 import hydra
 from hydra.utils import instantiate
-from omegaconf import DictConfig, OmegaConf
+from omegaconf import DictConfig
 
-from torch import Tensor
 from torch.optim import Optimizer
 
-from typing import Any, Dict, List
 
 from lightning import Trainer
 from lightning.pytorch import callbacks
-from lightning.pytorch.loggers import WandbLogger
 import lightning.pytorch as pl
 
 from model.slt import SLTModel
 import cv2
+from typing import Any
 
-from misc.git_utils import save_git_info
 
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 logger = logging.getLogger(__name__)  # NOTE: lightning already setupo the logger for us
@@ -32,7 +29,7 @@ cv2.setNumThreads(0)  # NOTE: set the number of threads to 0 to avoid cv2 error
 
 
 # NOTE: the hydra appp only inisitalize once
-@hydra.main(config_path="../configs", config_name="test_train", version_base="1.3.2")
+@hydra.main(config_path="../configs", config_name="initial_train", version_base="1.3.2")
 def main(cfg: DictConfig) -> None:
     train(cfg)
 
@@ -44,10 +41,6 @@ def train(cfg: DictConfig) -> None:
 
     logger.info(f"Output directory: {working_dir}")
 
-    # NOTE: load vocab
-    with open(cfg.data.vocab_file, "r", encoding="utf-8") as f:
-        vocab = [line.strip() for line in f if line.strip()]  # Remove empty lines
-
     # NOTE: define callbacks for trainer
     cbs = [
         callbacks.RichProgressBar(),
@@ -58,7 +51,7 @@ def train(cfg: DictConfig) -> None:
     t = Trainer(
         accelerator="gpu",
         strategy="ddp",
-        devices=[0, 1],
+        devices=[0],
         callbacks=cbs,
         log_every_n_steps=50,
         # max_steps=
@@ -74,7 +67,7 @@ def train(cfg: DictConfig) -> None:
     logger.info(f"Process in local rank {t.local_rank}, global rank {t.global_rank}")
 
     datamodule = instantiate(cfg.data.datamodule, cfg)
-    model = SLTModel(cfg, vocab)
+    model = SLTModel(cfg)
     t.fit(model, datamodule=datamodule)
 
 

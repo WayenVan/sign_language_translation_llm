@@ -11,7 +11,7 @@ from transformers import (
 
 class VitPoseVisualEncoder(torch.nn.Module):
     def __init__(self, id, hidden_states_layer):
-        super(VitPoseVisualEncoder, self).__init__()
+        super().__init__()
         self.id = id
         self.model: VitPoseForPoseEstimation = VitPoseForPoseEstimation.from_pretrained(
             id
@@ -23,7 +23,7 @@ class VitPoseVisualEncoder(torch.nn.Module):
         self.hidden_states_layer = hidden_states_layer
 
     ViTPoseVisualEncoderOutput = namedtuple(
-        "ViTPoseVisualEncoderOutput", ["hidden_states", "video_length", "heatmaps"]
+        "ViTPoseVisualEncoderOutput", ["hidden_state", "video_length", "heatmaps"]
     )
 
     def forward(
@@ -39,7 +39,7 @@ class VitPoseVisualEncoder(torch.nn.Module):
         video = rearrange(video, "b t c h w -> (b t) c h w")
         outputs = self.model(
             video,
-            dataset_index=torch.zeros(B * T).long(),  # 0 is the best
+            dataset_index=torch.zeros(B * T).long().to(video.device),  # 0 is the best
             output_hidden_states=True,
         )
         return self.ViTPoseVisualEncoderOutput(

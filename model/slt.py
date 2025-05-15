@@ -1,28 +1,26 @@
 import torch
 from lightning import LightningModule
-from transformers import AutoTokenizer
-from transformers.cache_utils import DynamicCache
+from transformers import AutoTokenizer, AutoConfig
 from omegaconf import DictConfig
-from transformers.models.gemma3 import Gemma3ForCausalLM
 from hydra.utils import instantiate
-from torchmetrics import Accuracy
-from torch.optim import Optimizer
 from typing import Dict, Any
 import logging
 from typing import Optional, List
 from einops import rearrange
 from collections import OrderedDict
 
-from experiments.bert import BertModel
+from transformers.models.bert.modeling_bert import BertModel, BertConfig
 from .handles.itc_handle import ITCHandle
 from .handles.mlm_handle import MLMHandle
 
+from torch import nn
+from torch.optim import Optimizer
 
 logger = logging.getLogger(__name__)  # NOTE: lightning already setupo the logger for us
 
 
 class SLTModel(LightningModule):
-    def __init__(self, cfg, vocab):
+    def __init__(self, cfg):
         super().__init__()
         self.cfg = cfg
         self.debug = cfg.debug
@@ -46,8 +44,8 @@ class SLTModel(LightningModule):
 
         if self.mlm_flag:
             self.handles["mlm"] = MLMHandle(
-                self.cfg,
-                self.mlm_mask_ratio,
+                self.vocab_size,
+                self.cfg.mlm_mask_ratio,
             )
             self.mlm_weight = self.cfg.mlm_weight
 
@@ -62,14 +60,14 @@ class SLTModel(LightningModule):
     def _create_layers(self):
         self.visual_encoder = instantiate(self.cfg.modules.visual_encoder)
         self.visual_adapter = instantiate(self.cfg.modules.visual_adapter)
-        self.shared_encoder = instantiate(self.cfg.modules.shared_encoder)
 
         # NOTE: visual bacbone is frozen
         for paras in self.visual_encoder.parameters():
             paras.requires_grad = False
+        self.visual_encoder.eval()
 
     def _create_bert_shared_encoder(self):
-        self.shared_encoder = BertModel(
+        self.shared_encoder = BertModel.from_pretrained(
             self.cfg.modules.bert_shared_encoder_id,
             device_map="cpu",
             torch_dtype=torch.float32,
@@ -80,9 +78,19 @@ class SLTModel(LightningModule):
         )
         self.tokenizer.padding_side = "right"
 
+        self.bert_config = AutoConfig.from_pretrained(
+            self.cfg.modules.bert_shared_encoder_id,
+        )
+        self.vocab_size = self.bert_config.vocab_size
+        self.shared_encoder_header = nn.Linear(
+            self.bert_config.hidden_size,
+            self.vocab_size,
+        )
+
         # NOTE: freeze all the embedding model in the layer
         for paras in self.shared_encoder.get_input_embeddings().parameters():
             paras.requires_grad = False
+        self.shared_encoder.get_input_embeddings().eval()
 
     def on_save_checkpoint(self, state_dict: Dict[str, Any]) -> None:
         for key in state_dict:
@@ -114,12 +122,18 @@ class SLTModel(LightningModule):
 
     def train(self, is_train):
         super().train(is_train)
-
-        # NOTE: freeze all the parameters in the model
-        if self.llm is not None:
-            self.llm.eval()
-        self.llm_embedding_layer.eval()
+        self.shared_encoder.get_input_embeddings().eval()
         self.visual_encoder.eval()
+
+    def configure_optimizers(self):
+        opt: Optimizer = instantiate(
+            self.cfg.engine.optimizer,
+            [
+                {"params": filter(lambda p: p.requires_grad, self.parameters())},
+            ],
+        )
+        scheduler = instantiate(self.cfg.engine.lr_scheduler, opt)
+        return {"optimizer": opt, "lr_scheduler": scheduler}
 
 
 if __name__ == "__main__":

@@ -1,7 +1,7 @@
 from lightning import LightningDataModule
 import torch
 from torch.nn import functional as F
-from data.ph14t.ph14t_torch_dataset import Ph14KeywordDataset
+from data.ph14t.ph14t_torch_dataset import Ph14TDataset
 from torch.utils.data import DataLoader
 from omegaconf import DictConfig
 from hydra.utils import instantiate
@@ -29,22 +29,19 @@ class Ph14TDataModule(LightningDataModule):
     def setup(self, stage=None):
         # Set up the dataset for training, validation, and testing
         if stage == "fit" or stage is None:
-            self.train_dataset = Ph14KeywordDataset(
+            self.train_dataset = Ph14TDataset(
                 data_root=self.cfg.data.data_root,
-                keyword_dir=self.cfg.data.keyword_dir,
                 mode="train",
                 transforms=self.transforms_train,
             )
-            self.val_dataset = Ph14KeywordDataset(
+            self.val_dataset = Ph14TDataset(
                 data_root=self.cfg.data.data_root,
-                keyword_dir=self.cfg.data.keyword_dir,
                 mode="dev",
                 transforms=self.transforms_val,
             )
         if stage == "test" or stage is None:
-            self.test_dataset = Ph14KeywordDataset(
+            self.test_dataset = Ph14TDataset(
                 data_root=self.cfg.data.data_root,
-                keyword_dir=self.cfg.data.keyword_dir,
                 mode="test",
                 transforms=self.transforms_test,
             )
@@ -95,11 +92,11 @@ class Ph14TDataModule(LightningDataModule):
             for video in videos
         ]
         padded_videos = torch.stack(padded_videos)
-        keywords = [item["keywords"] for item in batch]
+        text = [item["text"] for item in batch]
         ids = [item["id"] for item in batch]
         return dict(
             ids=ids,
             video=padded_videos,
             video_length=torch.tensor(v_length, dtype=torch.int64),
-            keywords=keywords,
+            text=text,
         )

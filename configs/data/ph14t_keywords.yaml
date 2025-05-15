@@ -2,8 +2,6 @@ batch_size: 1
 batch_size_val_test: 1
 
 data_root: /root/projects/slt_set_llms/dataset/PHOENIX-2014-T-release-v3
-keyword_dir: /root/projects/slt_set_llms/outputs/keywords
-vocab_file: /root/projects/slt_set_llms/outputs/keywords_vocab.txt
 
 transforms:
   train:
@@ -13,8 +11,8 @@ transforms:
         height: 256
         width: 256
       - _target_: data.transforms.RandomCropVideo
-        height: 224
-        width: 224
+        height: 256
+        width: 192
       - _target_: data.transforms.NormalizeVideo
         max_pixel_value: 1.0
       - _target_: data.transforms.ToTensorVideo
@@ -26,8 +24,8 @@ transforms:
         height: 256
         width: 256
       - _target_: data.transforms.CenterCropVideo
-        height: 224
-        width: 224
+        height: 256
+        width: 192
       - _target_: data.transforms.NormalizeVideo
         max_pixel_value: 1.0
       - _target_: data.transforms.ToTensorVideo

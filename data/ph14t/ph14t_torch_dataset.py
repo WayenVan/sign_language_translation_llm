@@ -6,20 +6,12 @@ import os
 import polars as pl
 
 
-class Ph14KeywordDataset(Dataset):
-    def __init__(
-        self, data_root: str, keyword_dir: str, mode: str = "train", transforms=None
-    ):
+class Ph14TDataset(Dataset):
+    def __init__(self, data_root: str, mode: str = "train", transforms=None):
         self.ph14t_index = Ph14TIndex(data_root, mode)
         self.ids = self.ph14t_index.ids
         self.mode = mode
         self.transforms = transforms
-
-        self.keyword_dir = keyword_dir
-        self.keyword_file = os.path.join(
-            self.keyword_dir, f"{self.mode}-extracted-keywords.csv"
-        )
-        self.keyword_data = pl.read_csv(self.keyword_file, separator="|")
 
     def __len__(self):
         return len(self.ids)
@@ -35,18 +27,14 @@ class Ph14KeywordDataset(Dataset):
             image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
             video_frame.append(image)
 
-        keywords = self.keyword_data.filter(pl.col("id") == id).to_dicts()[0][
-            "keywords"
-        ]
-
         ret = dict(
             id=id,
             # NOTE: [time, height, width, channel], normalized to [0, 1]
             video=numpy.array(video_frame, dtype=numpy.float32) / 255.0,
-            translation=data_info["translation"],
-            keywords=keywords,
+            text=data_info["translation"],
         )
 
         if self.transforms:
             ret = self.transforms(ret)
+
         return ret

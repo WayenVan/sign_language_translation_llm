@@ -1,6 +1,5 @@
 defaults:
   - modules: default
-  - loss: loss
   - engine: default
   - data: ph14t_keywords
   - _self_
@@ -17,6 +16,7 @@ itc_flag: False
 itc_weight: 1.0
 
 mlm_flag: True
+mlm_mask_ratio: 0.15
 mlm_weight: 1.0
 
 prompt_learning: False
