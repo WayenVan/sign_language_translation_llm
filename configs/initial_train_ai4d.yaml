@@ -17,3 +17,5 @@ engine:
     step_size: 50
   optmizer:
     lr: 1e-4
+
+devices: [0]

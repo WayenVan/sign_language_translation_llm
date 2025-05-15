@@ -40,10 +40,6 @@ def train(cfg: DictConfig) -> None:
 
     logger.info(f"Output directory: {working_dir}")
 
-    # NOTE: load vocab
-    with open(cfg.data.vocab_file, "r", encoding="utf-8") as f:
-        vocab = [line.strip() for line in f if line.strip()]  # Remove empty lines
-
     # NOTE: define callbacks for trainer
     cbs = [
         callbacks.RichProgressBar(),
@@ -71,7 +67,7 @@ def train(cfg: DictConfig) -> None:
     # NOTE: start training
     t = Trainer(
         accelerator="gpu",
-        strategy="ddp",
+        strategy="ddp_find_unused_parameters_true",
         devices=getattr(cfg, "devices", "auto"),
         callbacks=cbs,
         log_every_n_steps=50,
@@ -95,7 +91,7 @@ def train(cfg: DictConfig) -> None:
     logger.info(f"Process in local rank {t.local_rank}, global rank {t.global_rank}")
 
     datamodule = instantiate(cfg.data.datamodule, cfg)
-    model = SLTModel(cfg, vocab)
+    model = SLTModel(cfg)
     t.fit(model, datamodule=datamodule)
 
 
@@ -137,14 +133,13 @@ class DebugCallback(callbacks.Callback):
         nan_flag = False
         for name, param in pl_module.named_parameters():
             global_step = trainer.global_step
-            if name.startswith("llm_embedding_layer"):
-                continue
+
             if torch.isnan(param).any():
                 nan_flag = True
                 logger.warning(
                     f"In Step {global_step}, Param {name} has mean: {param.mean()}, std: {param.std()}"
                 )
-            if torch.isnan(param.grad).any():
+            if param.grad is not None and torch.isnan(param.grad).any():
                 nan_flag = True
                 logger.warning(
                     f"In Step {global_step}, Param {name} has grad mean: {param.grad.mean()}, std: {param.grad.std()}"
