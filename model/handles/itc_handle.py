@@ -22,11 +22,15 @@ class ITCHandle(BaseHandle):
         self.vocab_size = vocab_size
 
         self.train_accu = Accuracy(
-            task="multiclass", num_classes=self.vocab_size, ignore_index=0
+            task="multiclass",
+            num_classes=self.vocab_size,
+            ignore_index=0,  # padding index
         )
 
         self.val_accu = Accuracy(
-            task="multiclass", num_classes=self.vocab_size, ignore_index=0
+            task="multiclass",
+            num_classes=self.vocab_size,
+            ignore_index=0,  # paddding index
         )
 
     def dispatch_batch(self, batch, device):

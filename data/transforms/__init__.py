@@ -5,9 +5,11 @@ from .video import (
     NormalizeVideo,
     ToTensorVideo,
     ToGpuVideo,
+    UniformSampleVideo,
 )
 
 __all__ = [
+    "UniformSampleVideo",
     "CenterCropVideo",
     "RandomCropVideo",
     "ResizeVideo",

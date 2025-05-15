@@ -1,4 +1,4 @@
-batch_size: 2
+batch_size: 1
 batch_size_val_test: 1
 
 data_root: /root/projects/slt_set_llms/dataset/PHOENIX-2014-T-release-v3
@@ -7,6 +7,8 @@ transforms:
   train:
     _target_: torchvision.transforms.Compose
     transforms:
+      - _target_: data.transforms.UniformSampleVideo
+        target_len: 128
       - _target_: data.transforms.ResizeVideo
         height: 256
         width: 256
@@ -15,11 +17,15 @@ transforms:
         width: 192
       - _target_: data.transforms.NormalizeVideo
         max_pixel_value: 1.0
+        mean: [0.485, 0.456, 0.406]
+        std: [0.229, 0.224, 0.225]
       - _target_: data.transforms.ToTensorVideo
 
   val:
     _target_: torchvision.transforms.Compose
     transforms:
+      - _target_: data.transforms.UniformSampleVideo
+        target_len: 128
       - _target_: data.transforms.ResizeVideo
         height: 256
         width: 256
@@ -28,6 +34,8 @@ transforms:
         width: 192
       - _target_: data.transforms.NormalizeVideo
         max_pixel_value: 1.0
+        mean: [0.485, 0.456, 0.406]
+        std: [0.229, 0.224, 0.225]
       - _target_: data.transforms.ToTensorVideo
 
   test: null # NOTE: same as the val
@@ -36,7 +44,7 @@ datamodule:
   _target_: data.ph14t.Ph14TDataModule
   pin_memory: true # NOTE: any other keywords for dataloader
   shuffle: false
-  num_workers: 4
+  num_workers: 6
   persistent_workers: true
   multiprocessing_context: spawn
   prefetch_factor: 2

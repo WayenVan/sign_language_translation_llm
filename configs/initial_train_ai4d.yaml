@@ -1,0 +1,19 @@
+defaults:
+  - base_train
+  - _self_
+
+debug: False
+max_epochs: 100
+
+loss:
+  cross_model_weight: 1e3
+
+data:
+  batch_size: 2
+  data_root: /root/projects/sign_language_translation_llm/dataset/PHOENIX-2014-T-release-v3
+
+engine:
+  lr_scheduler:
+    step_size: 50
+  optmizer:
+    lr: 1e-4
