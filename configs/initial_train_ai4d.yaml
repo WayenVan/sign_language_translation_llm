@@ -1,0 +1,23 @@
+defaults:
+  - base_train
+  - _self_
+
+debug: False
+max_epochs: 100
+devices: [0]
+
+loss:
+  cross_model_weight: 1e3
+
+engine:
+  lr_scheduler:
+    step_size: 50
+  optimizer:
+    lr: 1e-4
+
+data:
+  vocab_file: /root/projects/sign_language_translation_llm/dataset/keywords_vocab.txt
+  keyword_dir: /root/projects/sign_language_translation_llm/dataset/keywords
+  data_root: /root/projects/sign_language_translation_llm/dataset/PHOENIX-2014-T-release-v3
+  datamodule:
+    num_workers: 8
