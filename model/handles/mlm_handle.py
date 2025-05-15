@@ -178,6 +178,10 @@ class MLMHandle(BaseHandle):
 
         out_loglogit = F.log_softmax(out_logit, dim=-1)
 
+        # Add NaN check
+        if torch.isnan(out_loglogit).any():
+            raise ValueError("NaN detected in log probabilities")
+
         self.train_accu.update(
             rearrange(out_loglogit, "b l c -> (b l) c"),
             rearrange(mask_text_labels, "b l -> (b l)"),
@@ -201,9 +205,8 @@ class MLMHandle(BaseHandle):
 
         out_logit, mask_text_labels = self._forward(module, video, video_length, text)
 
-        out_loglogit = F.log_softmax(out_logit, dim=-1)
         self.val_accu.update(
-            rearrange(out_loglogit, "b l c -> (b l) c"),
+            rearrange(out_logit, "b l c -> (b l) c"),
             rearrange(mask_text_labels, "b l -> (b l)"),
         )
 

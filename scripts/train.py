@@ -52,7 +52,7 @@ def train(cfg: DictConfig) -> None:
             save_last=True,
             save_weights_only=True,
         ),
-        DebugCallback(),
+        # DebugCallback(),
     ]
 
     # NOTE: set the logger
@@ -73,7 +73,7 @@ def train(cfg: DictConfig) -> None:
         log_every_n_steps=50,
         max_epochs=cfg.max_epochs,
         gradient_clip_val=1.0,  # NOTE: gradient clipping will be normed
-        gradient_clip_algorithm="value",
+        # gradient_clip_algorithm="value",
         sync_batchnorm=True,
         precision="16-mixed",
         logger=lt_logger,
@@ -122,7 +122,7 @@ class DebugCallback(callbacks.Callback):
                 f"Video shape: {video.shape}, mean: {video.mean()}, std: {video.std()}"
             )
             logger.warning(f"input_ids: {ids}")
-            trainer.should_stop = True
+            # trainer.should_stop = True
 
     def on_before_optimizer_step(
         self,

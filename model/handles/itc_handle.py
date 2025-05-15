@@ -175,14 +175,25 @@ class ITCHandle(BaseHandle):
 
     def train_step(self, module: lightning, batch, batch_idx):
         ids, video, video_length, text = self.dispatch_batch(batch, module.device)
-
         text_ids, labels, text_length = self.tokenize(
             text, module.tokenizer, module.device
         )
 
+        # Validate lengths
+        if (video_length == 0).any() or (text_length == 0).any():
+            raise ValueError("Zero-length sequences detected in batch")
+
+        # Validate labels
+        if (labels >= self.vocab_size).any():
+            raise ValueError(f"Label values exceed vocab size {self.vocab_size}")
+
         out_logit = self._forward(module, video, video_length, text_ids, text_length)
 
+        # Add numerical stability
         out_loglogit = F.log_softmax(out_logit, dim=-1)
+
+        if torch.isnan(out_loglogit).any():
+            raise ValueError("NaN detected in log probabilities")
 
         self.train_accu.update(
             rearrange(out_loglogit, "b l c -> (b l) c"),
@@ -193,14 +204,15 @@ class ITCHandle(BaseHandle):
             F.nll_loss(
                 rearrange(out_loglogit, "b l c -> (b l) c"),
                 rearrange(labels, "b l -> (b l)"),
+                ignore_index=0,
             )
             * self.loss_weight
         )
-        module.log(
-            "train_generate_loss",
-            loss,
-            prog_bar=True,
-        )
+
+        if torch.isnan(loss):
+            raise ValueError("NaN loss detected")
+
+        module.log("train_generate_loss", loss, prog_bar=True)
         return loss
 
     def validation_step(self, module: lightning, batch, batch_idx):
@@ -212,9 +224,7 @@ class ITCHandle(BaseHandle):
 
         out_logit = self._forward(module, video, video_length, text_ids, text_length)
 
-        out_loglogit = F.log_softmax(out_logit, dim=-1)
-
         self.val_accu.update(
-            rearrange(out_loglogit, "b l c -> (b l) c"),
+            rearrange(out_logit, "b l c -> (b l) c"),
             rearrange(labels, "b l -> (b l)"),
         )

@@ -86,6 +86,9 @@ class SLTModel(LightningModule):
             self.bert_config.hidden_size,
             self.vocab_size,
         )
+        # for name, module in self.shared_encoder.named_modules():
+        #     if isinstance(module, torch.nn.LayerNorm):
+        #         module.eps = 1e-5  # WARN: to avoid underflow of fp16
 
         # NOTE: freeze all the embedding model in the layer
         for paras in self.shared_encoder.embeddings.parameters():
