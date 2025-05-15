@@ -2,7 +2,7 @@ import sys
 from tqdm import tqdm
 
 sys.path.append(".")
-from data.ph14t.ph14t_torch_dataset import Ph14KeywordDataset
+from data.ph14t.ph14t_torch_dataset import Ph14TDataset
 from data.ph14t.ph14t_lightning_datamodule import Ph14TDataModule
 from hydra import compose, initialize
 from hydra.utils import instantiate
@@ -13,7 +13,7 @@ def test_dataset():
     keyword_dir = "/root/projects/slt_set_llms/outputs/keywords"
     mode = "train"
 
-    dataset = Ph14KeywordDataset(data_root, keyword_dir, mode)
+    dataset = Ph14TDataset(data_root, keyword_dir, mode)
 
     for i in tqdm(range(len(dataset))):
         data = dataset[i]
@@ -37,7 +37,7 @@ def test_data_validation():
     import cv2
 
     initialize(config_path="../configs")
-    cfg = compose("test_train")
+    cfg = compose("initial_train")
 
     del cfg.data.transforms.train.transforms[-2]
     del cfg.data.transforms.val.transforms[-2]

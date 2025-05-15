@@ -84,14 +84,21 @@ class MLMHandle(BaseHandle):
             device=input_ids.device,
         )
         maskable = ~((input_ids.unsqueeze(-1) == special).any(-1))
-        probs = (
-            torch.full(input_ids.shape, mlm_prob, device=input_ids.device)
-            * maskable.float()
-        )
-        masked = torch.bernoulli(probs).bool()
+
+        # Keep sampling until at least one token is maskable
+        while True:
+            probs = (
+                torch.full(input_ids.shape, mlm_prob, device=input_ids.device)
+                * maskable.float()
+            )
+            masked = torch.bernoulli(probs).bool()
+
+            if masked.any() or not maskable.any():
+                break
+
         labels[~masked] = -100
 
-        # 80%替换成 [MASK]
+        # Rest of original masking logic remains the same
         indices_replaced = (
             torch.bernoulli(
                 torch.full(input_ids.shape, mask_prob, device=input_ids.device)
@@ -100,7 +107,6 @@ class MLMHandle(BaseHandle):
         )
         input_ids[indices_replaced] = tokenizer.mask_token_id
 
-        # 10%替换成随机token
         indices_random = (
             torch.bernoulli(
                 torch.full(
@@ -116,7 +122,6 @@ class MLMHandle(BaseHandle):
             tokenizer.vocab_size, input_ids.shape, device=input_ids.device
         )[indices_random]
 
-        # 剩下的保持原token
         return input_ids, labels
 
     def _forward(self, module, video, video_length, text):
@@ -187,7 +192,8 @@ class MLMHandle(BaseHandle):
             rearrange(mask_text_labels, "b l -> (b l)"),
         )
 
-        # WARN: in case all labels are -100, the loss will be 0
+        # WARN: in case all labels are -100, the loss will be 0, impossible situation
+        # because the mask_token will reproduce if no token is masked
         if (mask_text_labels == -100).all():
             loss = torch.tensor(0.0, device=out_loglogit.device)
         else:
