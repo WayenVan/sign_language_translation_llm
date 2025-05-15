@@ -187,14 +187,18 @@ class MLMHandle(BaseHandle):
             rearrange(mask_text_labels, "b l -> (b l)"),
         )
 
-        loss = (
-            F.nll_loss(
-                rearrange(out_loglogit, "b l c -> (b l) c"),
-                rearrange(mask_text_labels, "b l -> (b l)"),
-                ignore_index=-100,
+        # WARN: in case all labels are -100, the loss will be 0
+        if (mask_text_labels == -100).all():
+            loss = torch.tensor(0.0, device=out_loglogit.device)
+        else:
+            loss = (
+                F.nll_loss(
+                    rearrange(out_loglogit, "b l c -> (b l) c"),
+                    rearrange(mask_text_labels, "b l -> (b l)"),
+                    ignore_index=-100,
+                )
+                * self.loss_weight
             )
-            * self.loss_weight
-        )
 
         module.log("train_masked_loss", loss, prog_bar=True)
 

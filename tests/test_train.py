@@ -29,9 +29,7 @@ cv2.setNumThreads(0)  # NOTE: set the number of threads to 0 to avoid cv2 error
 
 
 # NOTE: the hydra appp only inisitalize once
-@hydra.main(
-    config_path="../configs", config_name="initial_train_ai4d", version_base="1.3.2"
-)
+@hydra.main(config_path="../configs", config_name="initial_train", version_base="1.3.2")
 def main(cfg: DictConfig) -> None:
     train(cfg)
 
@@ -53,7 +51,7 @@ def train(cfg: DictConfig) -> None:
     t = Trainer(
         accelerator="gpu",
         strategy="ddp_find_unused_parameters_true",
-        devices=[0],
+        devices=[0, 1],
         callbacks=cbs,
         log_every_n_steps=50,
         # max_steps=
