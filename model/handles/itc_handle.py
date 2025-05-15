@@ -46,7 +46,7 @@ class ITCHandle(BaseHandle):
         Called at the end of the training epoch.
         """
         train_acc = self.train_accu.compute()
-        self.log("train_generate_accu", train_acc, prog_bar=True, sync_dist=True)
+        module.log("train_generate_accu", train_acc, prog_bar=True, sync_dist=True)
         self.train_accu.reset()
 
     def on_validation_epoch_end(self, module):

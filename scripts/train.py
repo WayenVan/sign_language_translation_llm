@@ -47,7 +47,7 @@ def train(cfg: DictConfig) -> None:
         callbacks.ModelCheckpoint(
             dirpath=working_dir,
             filename="epoch={epoch:02d}-wer={val_token_level_accu:.2f}",
-            monitor="val_token_level_accu",
+            monitor="val_generate_accu",
             mode="max",
             save_last=True,
             save_weights_only=True,
