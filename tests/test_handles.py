@@ -19,7 +19,7 @@ def test_itc_handle_mask():
         torch.tensor([5, 3]), torch.tensor([4, 2])
     )
     print(mask)
-    print(mask.shape)  # Should be (2, 1, 1, 12)
+    print(mask.shape)  # Should be (2,  1, 12)
 
 
 if __name__ == "__main__":

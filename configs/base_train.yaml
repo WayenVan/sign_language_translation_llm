@@ -12,11 +12,11 @@ max_epochs: 100
 debug: True
 devices: [0, 1]
 
-itc_flag: False
+itc_flag: True
 itc_weight: 1.0
 
 mlm_flag: True
-mlm_mask_ratio: 0.15
+mlm_mask_ratio: 0.40
 mlm_weight: 1.0
 
 prompt_learning: False

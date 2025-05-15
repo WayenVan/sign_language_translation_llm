@@ -1,4 +1,4 @@
-batch_size: 1
+batch_size: 2
 batch_size_val_test: 1
 
 data_root: /root/projects/slt_set_llms/dataset/PHOENIX-2014-T-release-v3

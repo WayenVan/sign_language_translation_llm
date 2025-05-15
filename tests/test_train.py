@@ -44,13 +44,13 @@ def train(cfg: DictConfig) -> None:
     # NOTE: define callbacks for trainer
     cbs = [
         callbacks.RichProgressBar(),
-        DebugCallback(),
+        # DebugCallback(),
     ]
 
     # NOTE: start training
     t = Trainer(
         accelerator="gpu",
-        strategy="ddp",
+        strategy="ddp_find_unused_parameters_true",
         devices=[0],
         callbacks=cbs,
         log_every_n_steps=50,
@@ -92,18 +92,33 @@ class DebugCallback(callbacks.Callback):
         pl_module: "pl.LightningModule",
         optimizer: Optimizer,
     ) -> None:
+        # NOTE: check the gradient norm
+        #
         for name, param in pl_module.named_parameters():
-            if name.startswith("llm_embedding_layer"):
-                continue
-            if torch.isnan(param).any():
-                logging.info(
-                    f"Param {name} has  mean: {param.mean()}, std: {param.std()}"
-                )
-            if torch.isnan(param.grad).any():
+            logging.info(f"Param {name} has  mean: {param.mean()}, std: {param.std()}")
+
+            if param.grad is not None:
                 logging.info(
                     f"Param {name} has grad mean: {param.grad.mean()}, std: {param.grad.std()}"
                 )
-        # trainer.should_stop = True
+            else:
+                logging.info(f"Param {name} has no grad")
+        if trainer.global_step > 3:
+            trainer.should_stop = True
+
+        # NOTE: check nan
+        for name, param in pl_module.named_parameters():
+            global_step = trainer.global_step
+
+            if torch.isnan(param).any():
+                logger.warning(
+                    f"In Step {global_step}, Param {name} has mean: {param.mean()}, std: {param.std()}"
+                )
+
+            if param.grad is not None and torch.isnan(param.grad).any():
+                logger.warning(
+                    f"In Step {global_step}, Param {name} has grad mean: {param.grad.mean()}, std: {param.grad.std()}"
+                )
         return
 
 

@@ -41,5 +41,6 @@ for id in index.ids[:2]:
         + "\n"
         + "the translation is:\n"
     )
-    output = tokenizer(translation)
+
+    output = tokenizer.tokenize(translation)
     print("output: " + str(output))

@@ -3,6 +3,7 @@ import torch
 from .base_handle import BaseHandle
 from torch.nn import functional as F
 from torchmetrics import Accuracy
+from einops import rearrange
 
 
 class MLMHandle(BaseHandle):
@@ -35,7 +36,7 @@ class MLMHandle(BaseHandle):
         Called at the end of the training epoch.
         """
         train_acc = self.train_accu.compute()
-        self.log("train_masked_accu", train_acc, prog_bar=True)
+        self.log("train_masked_accu", train_acc, prog_bar=True, sync_dist=True)
         self.train_accu.reset()
 
     def on_validation_epoch_end(self, module):
@@ -43,7 +44,7 @@ class MLMHandle(BaseHandle):
         Called at the end of the validation epoch.
         """
         val_acc = self.val_accu.compute()
-        self.log("val_masked_accu", val_acc, prog_bar=True)
+        module.log("val_masked_accu", val_acc, prog_bar=True, sync_dist=True)
         self.val_accu.reset()
 
     @staticmethod
@@ -123,7 +124,7 @@ class MLMHandle(BaseHandle):
             text,
             return_tensors="pt",
             padding=True,
-            add_special_tokens=False,  # NOTE: do not add special tokens
+            # add_special_tokens=False,  # NOTE: <CLs> and <SEP> will be added by the model
         )
         text_ids = tokenizer_outputs["input_ids"].to(module.device)  # (B, L)
         text_length = tokenizer_outputs["attention_mask"].sum(1).to(module.device)
@@ -178,21 +179,20 @@ class MLMHandle(BaseHandle):
         out_loglogit = F.log_softmax(out_logit, dim=-1)
 
         self.train_accu.update(
-            out_loglogit.view(-1, out_loglogit.size(-1)),
-            mask_text_labels.view(-1),
-            ignore_index=-100,
+            rearrange(out_loglogit, "b l c -> (b l) c"),
+            rearrange(mask_text_labels, "b l -> (b l)"),
         )
 
         loss = (
             F.nll_loss(
-                out_loglogit.view(-1, out_loglogit.size(-1)),
-                mask_text_labels.view(-1),
+                rearrange(out_loglogit, "b l c -> (b l) c"),
+                rearrange(mask_text_labels, "b l -> (b l)"),
                 ignore_index=-100,
             )
             * self.loss_weight
         )
 
-        module.log("train/loss", loss, prog_bar=True)
+        module.log("train_masked_loss", loss, prog_bar=True)
 
         return loss
 
@@ -203,9 +203,8 @@ class MLMHandle(BaseHandle):
 
         out_loglogit = F.log_softmax(out_logit, dim=-1)
         self.val_accu.update(
-            out_loglogit.view(-1, out_loglogit.size(-1)),
-            mask_text_labels.view(-1),
-            ignore_index=-100,
+            rearrange(out_loglogit, "b l c -> (b l) c"),
+            rearrange(mask_text_labels, "b l -> (b l)"),
         )
 
 

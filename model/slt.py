@@ -36,10 +36,10 @@ class SLTModel(LightningModule):
         self.mlm_flag = getattr(self.cfg, "mlm_flag", False)
         self.prompt_learning = getattr(self.cfg, "prompt_learning", False)
 
-        self.handles = OrderedDict()
+        self.handles = nn.ModuleDict()
 
         if self.itc_flag:
-            self.handles["itc"] = ITCHandle()
+            self.handles["itc"] = ITCHandle(self.vocab_size, self.cfg.itc_weight)
             self.itc_weight = self.cfg.itc_weight
 
         if self.mlm_flag:
@@ -88,9 +88,9 @@ class SLTModel(LightningModule):
         )
 
         # NOTE: freeze all the embedding model in the layer
-        for paras in self.shared_encoder.get_input_embeddings().parameters():
+        for paras in self.shared_encoder.embeddings.parameters():
             paras.requires_grad = False
-        self.shared_encoder.get_input_embeddings().eval()
+        self.shared_encoder.embeddings.eval()
 
     def on_save_checkpoint(self, state_dict: Dict[str, Any]) -> None:
         for key in state_dict:
@@ -106,6 +106,7 @@ class SLTModel(LightningModule):
         for name, l in losses.items():
             loss += l
 
+        self.log("train_loss", loss, prog_bar=True)
         return loss
 
     def validation_step(self, batch, batch_idx):
@@ -122,7 +123,7 @@ class SLTModel(LightningModule):
 
     def train(self, is_train):
         super().train(is_train)
-        self.shared_encoder.get_input_embeddings().eval()
+        self.shared_encoder.embeddings.eval()
         self.visual_encoder.eval()
 
     def configure_optimizers(self):
