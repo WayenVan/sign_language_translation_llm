@@ -12,3 +12,11 @@ hydra:
 max_epochs: 100
 debug: True
 devices: [0, 1]
+
+itc_flag: False
+itc_weight: 1.0
+
+mlm_flag: True
+mlm_weight: 1.0
+
+prompt_learning: False

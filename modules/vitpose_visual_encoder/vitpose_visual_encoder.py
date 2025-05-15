@@ -10,7 +10,7 @@ from transformers import (
 
 
 class VitPoseVisualEncoder(torch.nn.Module):
-    def __init__(self, id):
+    def __init__(self, id, hidden_states_layer):
         super(VitPoseVisualEncoder, self).__init__()
         self.id = id
         self.model: VitPoseForPoseEstimation = VitPoseForPoseEstimation.from_pretrained(
@@ -20,12 +20,17 @@ class VitPoseVisualEncoder(torch.nn.Module):
         self.image_size = self.vitpose_cfg.backbone_config.image_size
         self.hidden_size = self.vitpose_cfg.backbone_config.hidden_size
         self.num_keypoints = self.vitpose_cfg.num_labels
+        self.hidden_states_layer = hidden_states_layer
 
     ViTPoseVisualEncoderOutput = namedtuple(
         "ViTPoseVisualEncoderOutput", ["hidden_states", "video_length", "heatmaps"]
     )
 
-    def forward(self, video, video_length, hidden_states_layer=-1):
+    def forward(
+        self,
+        video,
+        video_length,
+    ):
         # video: (B, T, C, H, W)
         B, T, C, H, W = video.shape
         assert (H, W) == (self.image_size[0], self.image_size[1]), (
@@ -38,8 +43,8 @@ class VitPoseVisualEncoder(torch.nn.Module):
             output_hidden_states=True,
         )
         return self.ViTPoseVisualEncoderOutput(
-            hidden_states=rearrange(
-                outputs.hidden_states[hidden_states_layer],
+            hidden_state=rearrange(
+                outputs.hidden_states[self.hidden_states_layer],
                 "(b t) hw d -> b t hw d",
                 b=B,
                 t=T,

@@ -15,6 +15,7 @@ class VisualAdapter(nn.Module):
     def __init__(
         self,
         hidden_size,
+        target_hidden_size,
         num_heads,
         num_layers,
         num_extra_queries,
@@ -34,11 +35,8 @@ class VisualAdapter(nn.Module):
                     dim=hidden_size,
                     num_heads=num_heads,
                     mlp_ratio=mlp_ratio,
-                    qkv_bias=True,
-                    qk_norm=False,
                     proj_drop=proj_drop,
                     attn_drop=attn_drop,
-                    init_values=None,
                     drop_path=drop_path,
                     act_layer=nn.GELU,
                     norm_layer=nn.LayerNorm,
@@ -47,6 +45,7 @@ class VisualAdapter(nn.Module):
                 for _ in range(num_layers)
             ]
         )
+        self.linear = nn.Linear(hidden_size, target_hidden_size)
 
     def forward(self, x):
         # x: (B, T, HW, C)
@@ -54,15 +53,15 @@ class VisualAdapter(nn.Module):
         x = rearrange(x, "b t hw c -> (b t) hw c")
 
         extra_queries = repeat(self.extra_queries, "1 n c -> bt n c", bt=B * T)
-        x = torch.cat([extra_queries, x], dim=1)
-
         for block in self.blocks:
-            x = block(x)
+            extra_queries = block(extra_queries, x)
 
-        output_queries = x[:, : self.num_extra_queries]
-        output_queries = rearrange(output_queries, "(b t) n c -> b t n c", b=B, t=T)
+        extra_queries = rearrange(extra_queries, "(b t) n c -> b t n c", b=B, t=T)
 
-        return output_queries
+        feats = extra_queries.mean(dim=-2)  # (B T C)
+        feats = self.linear(feats)
+
+        return feats
 
 
 class Block(nn.Module):
@@ -71,8 +70,6 @@ class Block(nn.Module):
         dim: int,
         num_heads: int,
         mlp_ratio: float = 4.0,
-        qkv_bias: bool = False,
-        qk_norm: bool = False,
         proj_drop: float = 0.0,
         attn_drop: float = 0.0,
         init_values: Optional[float] = None,
@@ -82,15 +79,15 @@ class Block(nn.Module):
         mlp_layer: nn.Module = Mlp,
     ) -> None:
         super().__init__()
+        self.norm0 = norm_layer(dim)
         self.norm1 = norm_layer(dim)
-        self.attn = Attention(
-            dim,
+
+        self.attn = nn.MultiheadAttention(
+            embed_dim=dim,
             num_heads=num_heads,
-            qkv_bias=qkv_bias,
-            qk_norm=qk_norm,
-            attn_drop=attn_drop,
-            proj_drop=proj_drop,
-            norm_layer=norm_layer,
+            dropout=attn_drop,
+            bias=True,
+            batch_first=True,
         )
         self.ls1 = (
             LayerScale(dim, init_values=init_values) if init_values else nn.Identity()
@@ -109,8 +106,11 @@ class Block(nn.Module):
         )
         self.drop_path2 = DropPath(drop_path) if drop_path > 0.0 else nn.Identity()
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = x + self.drop_path1(self.ls1(self.attn(self.norm1(x))))
+    def forward(self, queries: torch.Tensor, keys: torch.Tensor) -> torch.Tensor:
+        keys = self.norm0(keys)
+        x = queries + self.drop_path1(
+            self.ls1(self.attn(self.norm1(queries), keys, keys)[0])
+        )
         x = x + self.drop_path2(self.ls2(self.mlp(self.norm2(x))))
         return x
 
