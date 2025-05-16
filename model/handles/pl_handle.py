@@ -12,7 +12,7 @@ class PLHandle(BaseHandle):
     Actually is very similar to the itg handle
     """
 
-    def __init__(self, vocab_size, loss_weight, llm_padding_idx):
+    def __init__(self, module, vocab_size, loss_weight, llm_padding_idx):
         super().__init__()
         self.loss_weight = loss_weight
         self.vocab_size = vocab_size
@@ -28,6 +28,12 @@ class PLHandle(BaseHandle):
             num_classes=self.vocab_size,
             ignore_index=llm_padding_idx,  # padding index
         )
+
+        # NOTE: freeze adapter, and shared encoder
+        for param in module.visual_adapter.parameters():
+            param.requires_grad = False
+        for param in module.shared_encoder.parameters():
+            param.requires_grad = False
 
     def dispatch_batch(self, batch, device):
         ids = batch["ids"]
@@ -223,3 +229,11 @@ class PLHandle(BaseHandle):
             rearrange(out_logit, "b l c -> (b l) c"),
             rearrange(labels, "b l -> (b l)"),
         )
+
+    def train(self, is_train):
+        """
+        freeze adapter, and shared encoder
+        """
+        super().train(is_train)
+        self.visual_adapter.eval()
+        self.shared_encoder.eval()

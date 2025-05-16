@@ -15,6 +15,7 @@ from transformers import AutoTokenizer
 
 from .handles.itc_handle import ITCHandle
 from .handles.mlm_handle import MLMHandle
+from .handles.pl_handle import PLHandle
 
 from torch import nn
 from torch.optim import Optimizer
@@ -37,18 +38,24 @@ class SLTModel(LightningModule):
     def _create_llm(self):
         self.connector = instantiate(self.cfg.modules.connector)
         if self.cfg.inference_mode or self.mlm_flag:
-            self.llm = Gemma3ForCausalLM("google/gemma-3-1b-it")
+            self.llm = Gemma3ForCausalLM(
+                "google/gemma-3-1b-it",
+                device_map="cpu",
+                torch_dtype=torch.float32,
+            )
             self.llm_tokenizer = AutoTokenizer.from_pretrained(
                 "google/gemma-3-1b-it",
                 use_fast=True,
             )
+            self.llm_tokenizer.padding_side = "right"
         else:
             self.llm = None
+            self.llm_tokenizer = None
 
     def _create_handles(self):
         self.itc_flag = getattr(self.cfg, "itc_flag", False)
         self.mlm_flag = getattr(self.cfg, "mlm_flag", False)
-        self.prompt_learning = getattr(self.cfg, "prompt_learning", False)
+        self.pl_flag = getattr(self.cfg, "pl_flag", False)
 
         self.handles = nn.ModuleDict()
 
@@ -63,13 +70,18 @@ class SLTModel(LightningModule):
             )
             self.mlm_weight = self.cfg.mlm_weight
 
-        if self.prompt_learning and (self.mlm_flag or self.itc_flag):
+        if self.pl_flag and (self.mlm_flag or self.itc_flag):
             raise ValueError(
                 "Prompt learning is not supported with MLM or ITC. Please set prompt_learning to False."
             )
 
-        if self.prompt_learning:
-            self.handles["prompt_learning"]  # TODO: implement prompt learning
+        if self.pl_flag:
+            self.handles["pl"] = PLHandle(
+                self,
+                self.vocab_size,
+                self.cfg.pl_weight,
+                self.llm_tokenizer.padding_idx,
+            )
 
     def _create_layers(self):
         self.visual_encoder = instantiate(self.cfg.modules.visual_encoder)
