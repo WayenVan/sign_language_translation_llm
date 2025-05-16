@@ -4,7 +4,7 @@ import logging
 
 sys.path.append(
     os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-)  # NOTE: this is the initial cwd when runing the sciprt, the hydra will change the cwd to the output dir
+)  # NOTE: this is the initial cwd when runing the sciprt
 
 import hydra
 from hydra.utils import instantiate
@@ -23,7 +23,7 @@ from misc.git_utils import save_git_info
 from typing import Any, Dict
 
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-logger = logging.getLogger(__name__)  # NOTE: lightning already setupo the logger for us
+logger = logging.getLogger(__name__)  # NOTE: hydra already setupo the logger for us
 cv2.setNumThreads(0)  # NOTE: set the number of threads to 0 to avoid cv2 error
 
 
@@ -35,17 +35,17 @@ def main(cfg: DictConfig) -> None:
 
 def train(cfg: DictConfig) -> None:
     hydra_config = hydra.core.hydra_config.HydraConfig.get()
-    working_dir = hydra_config.runtime.output_dir
+    output_dir = hydra_config.runtime.output_dir
     config_name = hydra_config.job.config_name
 
-    logger.info(f"Output directory: {working_dir}")
+    logger.info(f"Output directory: {output_dir}")
 
     # NOTE: define callbacks for trainer
     cbs = [
         callbacks.RichProgressBar(),
         callbacks.LearningRateMonitor("step", log_momentum=True),
         callbacks.ModelCheckpoint(
-            dirpath=working_dir,
+            dirpath=output_dir,
             filename="epoch={epoch:02d}-wer={val_token_level_accu:.2f}",
             monitor="val_generate_accu",
             mode="max",
@@ -57,7 +57,7 @@ def train(cfg: DictConfig) -> None:
 
     # NOTE: set the logger
     wdb_config = OmegaConf.to_container(cfg, resolve=True)
-    wdb_config["output_dir"] = working_dir
+    wdb_config["output_dir"] = output_dir
     lt_logger = WandbLogger(
         name=config_name,
         project="sign-langauge-translation-llm",
@@ -85,7 +85,7 @@ def train(cfg: DictConfig) -> None:
         # NOTE: save git info
         save_git_info(
             repo_path=project_root,
-            info_path=os.path.join(working_dir, "git_info"),
+            info_path=os.path.join(output_dir, "git_info"),
         )
 
     logger.info(f"Process in local rank {t.local_rank}, global rank {t.global_rank}")
