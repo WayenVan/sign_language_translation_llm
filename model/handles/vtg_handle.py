@@ -7,9 +7,9 @@ from einops import rearrange
 from torchmetrics import Accuracy
 
 
-class ITCHandle(BaseHandle):
+class VTGHandle(BaseHandle):
     """
-    Handles the model hooks for the MLM task.
+    Handles the model hooks for the VTM task.
     """
 
     def __init__(

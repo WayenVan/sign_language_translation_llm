@@ -13,8 +13,8 @@ from transformers.models.bert.modeling_bert import BertModel, BertConfig
 from transformers.models.gemma3 import Gemma3ForCausalLM
 from transformers import AutoTokenizer
 
-from .handles.itc_handle import ITCHandle
-from .handles.mlm_handle import MLMHandle
+from .handles.vtg_handle import VTGHandle
+from .handles.vtm_handle import VTMHandle
 from .handles.pl_handle import PLHandle
 
 from torch import nn
@@ -37,7 +37,7 @@ class SLTModel(LightningModule):
 
     def _create_llm(self):
         self.connector = instantiate(self.cfg.modules.connector)
-        if self.cfg.inference_mode or self.mlm_flag:
+        if self.cfg.inference_mode or self.vtm_flag:
             self.llm = Gemma3ForCausalLM(
                 "google/gemma-3-1b-it",
                 device_map="cpu",
@@ -53,26 +53,26 @@ class SLTModel(LightningModule):
             self.llm_tokenizer = None
 
     def _create_handles(self):
-        self.itc_flag = getattr(self.cfg, "itc_flag", False)
-        self.mlm_flag = getattr(self.cfg, "mlm_flag", False)
+        self.vtg_flag = getattr(self.cfg, "vtg_flag", False)
+        self.vtm_flag = getattr(self.cfg, "vtm_flag", False)
         self.pl_flag = getattr(self.cfg, "pl_flag", False)
 
         self.handles = nn.ModuleDict()
 
-        if self.itc_flag:
-            self.handles["itc"] = ITCHandle(self.vocab_size, self.cfg.itc_weight)
-            self.itc_weight = self.cfg.itc_weight
+        if self.vtg_flag:
+            self.handles["vtg"] = VTGHandle(self.vocab_size, self.cfg.vtg_weight)
+            self.vtg_weight = self.cfg.vtg_weight
 
-        if self.mlm_flag:
-            self.handles["mlm"] = MLMHandle(
+        if self.vtm_flag:
+            self.handles["vtm"] = VTMHandle(
                 self.vocab_size,
-                self.cfg.mlm_mask_ratio,
+                self.cfg.vtm_mask_ratio,
             )
-            self.mlm_weight = self.cfg.mlm_weight
+            self.vtm_weight = self.cfg.vtm_weight
 
-        if self.pl_flag and (self.mlm_flag or self.itc_flag):
+        if self.pl_flag and (self.vtm_flag or self.vtg_flag):
             raise ValueError(
-                "Prompt learning is not supported with MLM or ITC. Please set prompt_learning to False."
+                "Prompt learning is not supported with VTM or VTG. Please set prompt_learning to False."
             )
 
         if self.pl_flag:

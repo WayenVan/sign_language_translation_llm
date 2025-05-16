@@ -6,9 +6,9 @@ from torchmetrics import Accuracy
 from einops import rearrange
 
 
-class MLMHandle(BaseHandle):
+class VTMHandle(BaseHandle):
     """
-    Handles the model hooks for the MLM task.
+    Handles the model hooks for the VTM task.
     """
 
     def __init__(self, vocab_size, loss_weight, mask_ratio=0.15):
@@ -222,5 +222,5 @@ class MLMHandle(BaseHandle):
 
 
 if __name__ == "__main__":
-    mask = MLMHandle.generate_attention_mask(torch.tensor([5, 3]), torch.tensor([4, 2]))
+    mask = VTMHandle.generate_attention_mask(torch.tensor([5, 3]), torch.tensor([4, 2]))
     print(mask)
