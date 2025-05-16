@@ -10,6 +10,9 @@ from einops import rearrange
 from collections import OrderedDict
 
 from transformers.models.bert.modeling_bert import BertModel, BertConfig
+from transformers.models.gemma3 import Gemma3ForCausalLM
+from transformers import AutoTokenizer
+
 from .handles.itc_handle import ITCHandle
 from .handles.mlm_handle import MLMHandle
 
@@ -30,6 +33,17 @@ class SLTModel(LightningModule):
         self._create_layers()
         self._create_bert_shared_encoder()
         self._create_handles()
+
+    def _create_llm(self):
+        self.connector = instantiate(self.cfg.modules.connector)
+        if self.cfg.inference_mode or self.mlm_flag:
+            self.llm = Gemma3ForCausalLM("google/gemma-3-1b-it")
+            self.llm_tokenizer = AutoTokenizer.from_pretrained(
+                "google/gemma-3-1b-it",
+                use_fast=True,
+            )
+        else:
+            self.llm = None
 
     def _create_handles(self):
         self.itc_flag = getattr(self.cfg, "itc_flag", False)
@@ -95,11 +109,6 @@ class SLTModel(LightningModule):
             paras.requires_grad = False
         self.shared_encoder.embeddings.eval()
 
-    def on_save_checkpoint(self, state_dict: Dict[str, Any]) -> None:
-        for key in state_dict:
-            if key.startswith("llm_embedding_layer"):
-                del state_dict[key]
-
     def training_step(self, batch, batch_idx):
         losses = OrderedDict()
         for name, handle in self.handles.items():
@@ -138,6 +147,13 @@ class SLTModel(LightningModule):
         )
         scheduler = instantiate(self.cfg.engine.lr_scheduler, opt)
         return {"optimizer": opt, "lr_scheduler": scheduler}
+
+    def on_save_checkpoint(self, checkpoint: Dict[str, Any]) -> None:
+        for name in list(checkpoint.keys()):
+            if name.startswith("llm"):
+                del checkpoint[name]
+            if name.startswith("visual_encoder"):
+                del checkpoint[name]
 
 
 if __name__ == "__main__":
