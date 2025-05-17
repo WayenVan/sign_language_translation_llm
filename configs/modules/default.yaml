@@ -12,3 +12,9 @@ visual_adapter:
   num_extra_queries: 4
 
 bert_shared_encoder_id: dbmdz/bert-base-german-europeana-cased
+
+connector:
+  _target_: modules.LinearConnector
+  in_features: 768
+  out_features: 1152 #gemma3 1b
+  # out_features: 2560 #gemma3 1b

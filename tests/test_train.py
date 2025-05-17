@@ -46,7 +46,7 @@ def train(cfg: DictConfig) -> None:
     # NOTE: define callbacks for trainer
     cbs = [
         callbacks.RichProgressBar(),
-        # DebugCallback(),
+        DebugCallback(),
     ]
 
     # NOTE: start training
@@ -97,6 +97,8 @@ class DebugCallback(callbacks.Callback):
         # NOTE: check the gradient norm
         #
         for name, param in pl_module.named_parameters():
+            if param.grad is None:
+                continue
             logging.info(f"Param {name} has  mean: {param.mean()}, std: {param.std()}")
 
             if param.grad is not None:
@@ -105,7 +107,7 @@ class DebugCallback(callbacks.Callback):
                 )
             else:
                 logging.info(f"Param {name} has no grad")
-        if trainer.global_step > 3:
+        if trainer.global_step > 100:
             trainer.should_stop = True
 
         # NOTE: check nan

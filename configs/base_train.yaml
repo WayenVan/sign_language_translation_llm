@@ -20,3 +20,5 @@ vtm_mask_ratio: 0.40
 vtm_weight: 1.0
 
 prompt_learning: False
+
+inference_mode: False

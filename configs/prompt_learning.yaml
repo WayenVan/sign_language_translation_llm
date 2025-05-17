@@ -11,14 +11,20 @@ engine:
   optmizer:
     lr: 1e-4
 
+data:
+  batch_size: 2
+  batch_size_val_test: 1
+
 devices: [0, 1]
 
-itc_flag: False
-itc_weight: 1.0
+vtg_flag: False
+vtg_weight: 1.0
 
-mlm_flag: False
-mlm_mask_ratio: 0.40
-mlm_weight: 1.0
+vtm_flag: False
+vtm_mask_ratio: 0.40
+vtm_weight: 1.0
 
 pl_flag: True
 pl_weight: 1.0
+
+pretrained_checkpoint: /root/projects/slt_set_llms/outputs/train/2025-05-15_21-28-48/epoch=epoch=72-wer=val_token_level_accu=0.00.ckpt

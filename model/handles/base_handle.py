@@ -11,3 +11,6 @@ class BaseHandle(nn.Module):
 
     def test_step(self, module: LightningModule, batch, batch_idx):
         pass
+
+    def train_handle(self, module: LightningModule, is_train: bool):
+        pass

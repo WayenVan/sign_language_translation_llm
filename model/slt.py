@@ -10,8 +10,8 @@ from einops import rearrange
 from collections import OrderedDict
 
 from transformers.models.bert.modeling_bert import BertModel, BertConfig
-from transformers.models.gemma3 import Gemma3ForCausalLM
-from transformers import AutoTokenizer
+from transformers.models.gemma3 import Gemma3ForCausalLM, Gemma3ForConditionalGeneration
+from transformers import AutoModel
 
 from .handles.vtg_handle import VTGHandle
 from .handles.vtm_handle import VTMHandle
@@ -30,15 +30,19 @@ class SLTModel(LightningModule):
         self.debug = cfg.debug
 
         # write only for this model
+        self.vtg_flag = getattr(self.cfg, "vtg_flag", False)
+        self.vtm_flag = getattr(self.cfg, "vtm_flag", False)
+        self.pl_flag = getattr(self.cfg, "pl_flag", False)
 
+        self._create_llm()
         self._create_layers()
         self._create_bert_shared_encoder()
         self._create_handles()
 
     def _create_llm(self):
         self.connector = instantiate(self.cfg.modules.connector)
-        if self.cfg.inference_mode or self.vtm_flag:
-            self.llm = Gemma3ForCausalLM(
+        if self.cfg.inference_mode or self.pl_flag:
+            self.llm = Gemma3ForCausalLM.from_pretrained(
                 "google/gemma-3-1b-it",
                 device_map="cpu",
                 torch_dtype=torch.float32,
@@ -48,15 +52,16 @@ class SLTModel(LightningModule):
                 use_fast=True,
             )
             self.llm_tokenizer.padding_side = "right"
+
+            # NOTE: freezed llm
+            for paras in self.llm.parameters():
+                paras.requires_grad = False
+
         else:
             self.llm = None
             self.llm_tokenizer = None
 
     def _create_handles(self):
-        self.vtg_flag = getattr(self.cfg, "vtg_flag", False)
-        self.vtm_flag = getattr(self.cfg, "vtm_flag", False)
-        self.pl_flag = getattr(self.cfg, "pl_flag", False)
-
         self.handles = nn.ModuleDict()
 
         if self.vtg_flag:
@@ -78,9 +83,9 @@ class SLTModel(LightningModule):
         if self.pl_flag:
             self.handles["pl"] = PLHandle(
                 self,
-                self.vocab_size,
+                self.llm_tokenizer.vocab_size,
                 self.cfg.pl_weight,
-                self.llm_tokenizer.padding_idx,
+                self.llm_tokenizer.pad_token_type_id,
             )
 
     def _create_layers(self):
@@ -110,11 +115,8 @@ class SLTModel(LightningModule):
         self.vocab_size = self.bert_config.vocab_size
         self.shared_encoder_header = nn.Linear(
             self.bert_config.hidden_size,
-            self.vocab_size,
+            self.vocab_size,  # WARN: be careful with the vocab size and len(tokenizer)
         )
-        # for name, module in self.shared_encoder.named_modules():
-        #     if isinstance(module, torch.nn.LayerNorm):
-        #         module.eps = 1e-5  # WARN: to avoid underflow of fp16
 
         # NOTE: freeze all the embedding model in the layer
         for paras in self.shared_encoder.embeddings.parameters():
@@ -149,6 +151,9 @@ class SLTModel(LightningModule):
         super().train(is_train)
         self.shared_encoder.embeddings.eval()
         self.visual_encoder.eval()
+
+        for name, handle in self.handles.items():
+            handle.train_handle(self, is_train)
 
     def configure_optimizers(self):
         opt: Optimizer = instantiate(

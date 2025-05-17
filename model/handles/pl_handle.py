@@ -34,6 +34,8 @@ class PLHandle(BaseHandle):
             param.requires_grad = False
         for param in module.shared_encoder.parameters():
             param.requires_grad = False
+        module.visual_adapter.eval()
+        module.shared_encoder.eval()
 
     def dispatch_batch(self, batch, device):
         ids = batch["ids"]
@@ -64,23 +66,27 @@ class PLHandle(BaseHandle):
         """
         Tokenize the text using the tokenizer.
         """
+        tokenizer.add_bos_token = True
+        tokenizer.add_eos_token = False
 
         input_outputs = tokenizer(
             text,
-            padding="max_length",
+            padding=True,
             return_tensors="pt",
-        )
-        label_outputs = tokenizer(
-            text,
-            padding="max_length",
-            return_tensors="pt",
-            add_bos_token=False,
-            add_eos_token=True,
         )
 
-        assert input_outputs["attention_mask"] == label_outputs["attention_mask"], (
-            "Attention mask should be the same for input and label"
+        tokenizer.add_bos_token = False
+        tokenizer.add_eos_token = True
+
+        label_outputs = tokenizer(
+            text,
+            padding=True,
+            return_tensors="pt",
         )
+
+        assert torch.equal(
+            input_outputs["attention_mask"], label_outputs["attention_mask"]
+        ), "Attention mask should be the same for input and label"
 
         return (
             torch.LongTensor(input_outputs["input_ids"]).to(device),
@@ -91,7 +97,7 @@ class PLHandle(BaseHandle):
         )
 
     @staticmethod
-    def generate_padding_casual_attention_mask(
+    def generate_padding_attention_mask(
         video_length, text_length, max_video_length=None, max_text_length=None
     ):
         """
@@ -114,20 +120,10 @@ class PLHandle(BaseHandle):
         video_mask = video_mask.long()
         text_mask = text_mask.long()
 
-        padding_mask = torch.cat((video_mask, text_mask), dim=1).unsqueeze(
-            1
-        )  # for heads dimension and query dimension # (B,  1, L)
+        padding_mask = torch.cat((video_mask, text_mask), dim=1)
+        # for heads dimension and query dimension # (B, L)
 
-        # Generate causal mask
-        causal_mask = torch.triu(
-            torch.ones((max_text_length, max_text_length)),
-            diagonal=1,
-        ).to(video_mask.device)
-        causal_mask = torch.where(causal_mask == 1, 0, 1)
-        casual_mask = F.pad(
-            causal_mask, (max_video_length, 0, max_video_length, 0), value=1
-        )
-        return padding_mask * casual_mask
+        return padding_mask
 
     def _forward(self, module, video, video_length, text_ids, text_length):
         with torch.no_grad():
@@ -140,10 +136,10 @@ class PLHandle(BaseHandle):
             # NOTE: video embedding shou
             visual_embeddings = module.visual_adapter(hidden_state)  # b t c
 
-            visual_embeddings = module.shared_encoder(
-                inputs_embeds=visual_embeddings,
-                attention_mask=None,
-            ).last_hidden_state
+        visual_embeddings = module.shared_encoder(
+            inputs_embeds=visual_embeddings,
+            attention_mask=None,
+        ).last_hidden_state
         visual_embeddings = module.connector(visual_embeddings)  # b t c
 
         # NOTE: text embeddings
@@ -160,18 +156,17 @@ class PLHandle(BaseHandle):
             f"Text length {L} does not match max text length {text_length.max().item()}"
         )
 
-        # 5. 生成注意力掩码
-        padding_attention_casual = self.generate_padding_casual_attention_mask(
+        #
+        padding_attention_mask = self.generate_padding_attention_mask(
             v_length, text_length
         )
         features = torch.cat((visual_embeddings, textaul_embeddings), dim=1)  # b t+l c
 
-        with torch.no_grad():
-            out_features = module.llm(
-                inputs_embeds=features,
-                attention_mask=padding_attention_casual,
-            )
-        out_logit = out_features.logits[:, T:, :]
+        out_features = module.llm(
+            inputs_embeds=features,
+            attention_mask=padding_attention_mask,
+        )
+        out_logit = out_features.logits[:, T:, : self.vocab_size]  # b l c
         return out_logit
 
     def train_step(self, module, batch, batch_idx):
@@ -230,10 +225,6 @@ class PLHandle(BaseHandle):
             rearrange(labels, "b l -> (b l)"),
         )
 
-    def train(self, is_train):
-        """
-        freeze adapter, and shared encoder
-        """
-        super().train(is_train)
-        self.visual_adapter.eval()
-        self.shared_encoder.eval()
+    def train_handle(self, module, is_train):
+        module.visual_adapter.eval()
+        module.shared_encoder.eval()
