@@ -38,12 +38,14 @@ for id in index.ids[:2]:
     idx = tokenizer(prompt, return_tensors="pt").to("cuda:0")
     embeddings = model.get_input_embeddings()
     ebd = embeddings(idx["input_ids"])
+    attnion_mask = idx["attention_mask"]
 
     with torch.no_grad():
         output = model.generate(
             inputs_embeds=ebd,
             max_length=256,
             do_sample=False,
+            attnion_mask=attnion_mask,
             # top_k=50,
             # top_p=0.95,
             # temperature=0.7,

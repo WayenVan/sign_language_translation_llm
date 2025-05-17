@@ -10,7 +10,7 @@ def test_slt_model():
     import polars as pl
 
     initialize(config_path="../configs")
-    cfg = compose("test_train")
+    cfg = compose("prompt_learning")
     model = SLTModel(cfg).cuda()
 
     df = pl.read_csv("outputs/keywords/train-extracted-keywords.csv", separator="|")
