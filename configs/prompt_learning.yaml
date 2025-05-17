@@ -1,0 +1,24 @@
+defaults:
+  - base_train
+  - _self_
+
+debug: False
+max_epochs: 100
+
+engine:
+  lr_scheduler:
+    step_size: 50
+  optmizer:
+    lr: 1e-4
+
+devices: [0, 1]
+
+itc_flag: False
+itc_weight: 1.0
+
+mlm_flag: False
+mlm_mask_ratio: 0.40
+mlm_weight: 1.0
+
+pl_flag: True
+pl_weight: 1.0
