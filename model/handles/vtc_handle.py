@@ -11,10 +11,8 @@ class VTCHandle(BaseHandle):
     Handles the model hooks for the VTM task.
     """
 
-    def __init__(self, vocab_size, loss_weight, mask_ratio=0.15):
+    def __init__(self, loss_weight):
         super().__init__()
-        self.mask_ratio = mask_ratio
-
         self.loss_weight = loss_weight
 
     def dispatch_batch(self, batch, device):
@@ -128,16 +126,25 @@ class VTCHandle(BaseHandle):
             * self.loss_weight
         )
 
-        module.log("train_masked_loss", loss, prog_bar=True)
+        module.log("train_contrastive_loss", loss, prog_bar=True)
 
         return loss
 
     def validation_step(self, module, batch, batch_idx):
         ids, video, video_length, text = self.dispatch_batch(batch, module.device)
 
-        out_logit, mask_text_labels = self._forward(module, video, video_length, text)
-
-        self.val_accu.update(
-            rearrange(out_logit, "b l c -> (b l) c"),
-            rearrange(mask_text_labels, "b l -> (b l)"),
+        text_out_features, visual_out_features = self._forward(
+            module, video, video_length, text
         )
+
+        with torch.no_grad():
+            # WARN: in case all labels are -100, the loss will be 0, impossible situation
+            # because the mask_token will reproduce if no token is masked
+            loss = (
+                F.masked_bi_directional_contrastive_loss(
+                    visual_out_features, text_out_features
+                )
+                * self.loss_weight
+            )
+
+        module.log("val_contrastive_loss", loss, prog_bar=True)
