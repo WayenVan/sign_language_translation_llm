@@ -32,10 +32,10 @@ class PLHandle(BaseHandle):
         # NOTE: freeze adapter, and shared encoder
         for param in module.visual_adapter.parameters():
             param.requires_grad = False
-        for param in module.shared_encoder.parameters():
-            param.requires_grad = False
+        # for param in module.shared_encoder.parameters():
+        #     param.requires_grad = False
         module.visual_adapter.eval()
-        module.shared_encoder.eval()
+        # module.shared_encoder.eval()
 
     def dispatch_batch(self, batch, device):
         ids = batch["ids"]
@@ -227,4 +227,4 @@ class PLHandle(BaseHandle):
 
     def train_handle(self, module, is_train):
         module.visual_adapter.eval()
-        module.shared_encoder.eval()
+        # module.shared_encoder.eval()
