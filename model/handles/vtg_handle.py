@@ -151,7 +151,14 @@ class VTGHandle(BaseHandle):
         return padding_mask * casual_mask
 
     def _forward(
-        self, module, video, video_length, text_ids, text_length, with_video=True
+        self,
+        module,
+        video,
+        video_length,
+        text_ids,
+        text_length,
+        with_video=True,
+        output_attentions=False,
     ):
         if with_video:
             with torch.no_grad():
@@ -161,6 +168,8 @@ class VTGHandle(BaseHandle):
             v_length = visual_encoder_outputs.video_length
             visual_embeddings = module.visual_adapter(hidden_state)  # b t c
             B, T, C = visual_embeddings.shape
+        else:
+            v_length = video_length
 
         with torch.no_grad():
             textaul_embeddings = module.shared_encoder.get_input_embeddings()(
@@ -179,7 +188,7 @@ class VTGHandle(BaseHandle):
 
         # 5. 生成注意力掩码
         padding_attention_casual = self.generate_padding_casual_attention_mask(
-            v_length, text_length
+            v_length, text_length, with_video=with_video
         )
 
         if with_video:
@@ -192,7 +201,7 @@ class VTGHandle(BaseHandle):
         bert_output = module.shared_encoder(
             inputs_embeds=features,
             attention_mask=padding_attention_casual,
-            output_attentions=True,
+            output_attentions=output_attentions,
         )
 
         if with_video:
@@ -231,15 +240,16 @@ class VTGHandle(BaseHandle):
             * self.loss_weight
         )
 
-        mask = torch.arange(text_ids.size(1), device=text_length.device).expand(
-            len(text_length),
-            text_ids.size(1) < text_length.unsqueeze(1),
-        )
+        mask = torch.arange(text_ids.shape[1], device=text_length.device).expand(
+            len(text_length), text_ids.shape[1]
+        ) < text_length.unsqueeze(1)
         mask = mask.flatten()
         js_loss = (
             js_inverted_loss_from_log_probs(
                 rearrange(out_loglogit, "b l c -> (b l) c"),
-                rearrange(labels, "b l -> (b l)"),
+                rearrange(
+                    F.log_softmax(out_logit_text_only, dim=-1), "b l c -> (b l) c"
+                ),
                 mask=mask,
             )
             * self.js_weight
@@ -256,7 +266,7 @@ class VTGHandle(BaseHandle):
             text, module.tokenizer, module.device
         )
 
-        out_logit = self._forward(module, video, video_length, text_ids, text_length)
+        out_logit, _ = self._forward(module, video, video_length, text_ids, text_length)
 
         self.val_accu.update(
             rearrange(out_logit, "b l c -> (b l) c"),

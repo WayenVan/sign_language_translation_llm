@@ -10,3 +10,18 @@ engine:
     step_size: 50
   optmizer:
     lr: 1e-4
+
+vtg_flag: True
+vtg_weight: 1.0
+vtg_js_weight: 1.0
+
+vtm_flag: False
+vtm_mask_ratio: 0.40
+vtm_weight: 1.0
+
+vtc_flag: False
+vtc_weight: 1.0
+
+prompt_learning: False
+
+inference_mode: False

@@ -25,3 +25,15 @@ def js_inverted_loss_from_log_probs(log_p, log_q, mask=None, base=1.0, eps=1e-8)
 
     js = 0.5 * (kl_pm + kl_qm)
     return base - js
+
+
+if __name__ == "__main__":
+    # Example usage
+    log_p = torch.tensor([[0.1, 0.2], [0.3, 0.4]])
+    log_q = torch.tensor([[0.5, 0.6], [0.7, 0.8]])
+    mask = torch.tensor([1, 1])
+    base = 1.0
+    eps = 1e-8
+
+    loss = js_inverted_loss_from_log_probs(log_p, log_q, mask, base, eps)
+    print(loss)
