@@ -14,3 +14,9 @@ class BaseHandle(nn.Module):
 
     def train_handle(self, module: LightningModule, is_train: bool):
         pass
+
+    def on_train_epoch_end(self, module: LightningModule):
+        pass
+
+    def on_validation_epoch_end(self, module: LightningModule):
+        pass

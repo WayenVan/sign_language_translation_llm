@@ -19,6 +19,9 @@ vtm_flag: True
 vtm_mask_ratio: 0.40
 vtm_weight: 1.0
 
+vtc_flag: True
+vtc_weight: 1.0
+
 prompt_learning: False
 
 inference_mode: False

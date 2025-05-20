@@ -108,20 +108,20 @@ class VTCHandle(BaseHandle):
         text_out_features = out_features.last_hidden_state[:, T:, :]
         visual_out_features = out_features.last_hidden_state[:, :T, :]
 
-        return text_out_features, visual_out_features
+        return text_out_features, visual_out_features, text_length
 
     def train_step(self, module, batch, batch_idx):
         ids, video, video_length, text = self.dispatch_batch(batch, module.device)
 
-        text_out_features, visual_out_features = self._forward(
+        text_out_features, visual_out_features, text_length = self._forward(
             module, video, video_length, text
         )
 
         # WARN: in case all labels are -100, the loss will be 0, impossible situation
         # because the mask_token will reproduce if no token is masked
         loss = (
-            F.masked_bi_directional_contrastive_loss(
-                visual_out_features, text_out_features
+            masked_bi_directional_contrastive_loss(
+                visual_out_features, text_out_features, video_length, text_length
             )
             * self.loss_weight
         )
@@ -133,7 +133,7 @@ class VTCHandle(BaseHandle):
     def validation_step(self, module, batch, batch_idx):
         ids, video, video_length, text = self.dispatch_batch(batch, module.device)
 
-        text_out_features, visual_out_features = self._forward(
+        text_out_features, visual_out_features, text_length = self._forward(
             module, video, video_length, text
         )
 
@@ -141,8 +141,8 @@ class VTCHandle(BaseHandle):
             # WARN: in case all labels are -100, the loss will be 0, impossible situation
             # because the mask_token will reproduce if no token is masked
             loss = (
-                F.masked_bi_directional_contrastive_loss(
-                    visual_out_features, text_out_features
+                masked_bi_directional_contrastive_loss(
+                    visual_out_features, text_out_features, video_length, text_length
                 )
                 * self.loss_weight
             )

@@ -15,6 +15,7 @@ from transformers.models.gemma3 import Gemma3ForCausalLM, Gemma3ForConditionalGe
 from .handles.vtg_handle import VTGHandle
 from .handles.vtm_handle import VTMHandle
 from .handles.pl_handle import PLHandle
+from .handles.vtc_handle import VTCHandle
 
 from torch import nn
 from torch.optim import Optimizer
@@ -31,6 +32,7 @@ class SLTModel(LightningModule):
         # write only for this model
         self.vtg_flag = getattr(self.cfg, "vtg_flag", False)
         self.vtm_flag = getattr(self.cfg, "vtm_flag", False)
+        self.vtc_flag = getattr(self.cfg, "vtc_flag", False)
         self.pl_flag = getattr(self.cfg, "pl_flag", False)
 
         self._create_llm()
@@ -74,7 +76,13 @@ class SLTModel(LightningModule):
             )
             self.vtm_weight = self.cfg.vtm_weight
 
-        if self.pl_flag and (self.vtm_flag or self.vtg_flag):
+        if self.vtc_flag:
+            self.handles["vtc"] = VTCHandle(
+                self.cfg.vtc_weight,
+            )
+            self.vtc_weight = self.cfg.vtc_weight
+
+        if self.pl_flag and (self.vtm_flag or self.vtg_flag or self.vtc_flag):
             raise ValueError(
                 "Prompt learning is not supported with VTM or VTG. Please set prompt_learning to False."
             )
@@ -170,6 +178,7 @@ class SLTModel(LightningModule):
                 del checkpoint[name]
             if name.startswith("visual_encoder"):
                 del checkpoint[name]
+        return checkpoint
 
     def generate(
         self,
