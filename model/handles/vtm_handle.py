@@ -80,6 +80,7 @@ class VTMHandle(BaseHandle):
     ):
         labels = input_ids.clone()
         special = torch.tensor(
+            # [tokenizer.cls_token_id, tokenizer.sep_token_id, tokenizer.pad_token_id],
             [tokenizer.cls_token_id, tokenizer.sep_token_id, tokenizer.pad_token_id],
             device=input_ids.device,
         )
@@ -168,18 +169,21 @@ class VTMHandle(BaseHandle):
         )
         features = torch.cat((visual_embeddings, textaul_embeddings), dim=1)  # b t+l c
 
-        out_features = module.shared_encoder(
+        bert_output = module.shared_encoder(
             inputs_embeds=features,
             attention_mask=padding_attention_mask,
+            output_attentions=True,
         )
-        out_features = out_features.last_hidden_state[:, T:, :]
+        out_features = bert_output.last_hidden_state[:, T:, :]
         out_logit = module.shared_encoder_header(out_features)  # b l vocab_size
-        return out_logit, mask_text_labels
+        return out_logit, mask_text_labels, bert_output.attentions
 
     def train_step(self, module, batch, batch_idx):
         ids, video, video_length, text = self.dispatch_batch(batch, module.device)
 
-        out_logit, mask_text_labels = self._forward(module, video, video_length, text)
+        out_logit, mask_text_labels, _ = self._forward(
+            module, video, video_length, text
+        )
 
         out_loglogit = F.log_softmax(out_logit, dim=-1)
 

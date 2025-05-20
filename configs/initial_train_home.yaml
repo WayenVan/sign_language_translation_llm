@@ -6,7 +6,7 @@ debug: False
 max_epochs: 100
 
 data:
-  batch_size: 2
+  batch_size: 1
   data_root: /root/shared-data/sign_language_translation_llm/dataset/PHOENIX-2014-T-release-v3/
 
 engine:
@@ -16,3 +16,18 @@ engine:
     lr: 1e-4
 
 devices: [0]
+
+vtg_flag: True
+vtg_weight: 1.0
+vtg_js_weight: 1.0
+
+vtm_flag: False
+vtm_mask_ratio: 0.40
+vtm_weight: 1.0
+
+vtc_flag: False
+vtc_weight: 1.0
+
+prompt_learning: False
+
+inference_mode: False

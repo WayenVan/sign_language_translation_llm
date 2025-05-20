@@ -5,6 +5,7 @@ from torch.nn import functional as F
 from typing import List
 from einops import rearrange
 from torchmetrics import Accuracy
+from misc.js_loss import js_inverted_loss_from_log_probs
 
 
 class VTGHandle(BaseHandle):
@@ -16,6 +17,7 @@ class VTGHandle(BaseHandle):
         self,
         vocab_size,
         loss_weight,
+        vtg_js_weight,
     ):
         super().__init__()
         self.loss_weight = loss_weight
@@ -99,7 +101,11 @@ class VTGHandle(BaseHandle):
 
     @staticmethod
     def generate_padding_casual_attention_mask(
-        video_length, text_length, max_video_length=None, max_text_length=None
+        video_length,
+        text_length,
+        max_video_length=None,
+        max_text_length=None,
+        with_video=True,
     ):
         """
         Generate addtivie attention mask for the video and text sequences.
@@ -121,40 +127,51 @@ class VTGHandle(BaseHandle):
         video_mask = video_mask.long()
         text_mask = text_mask.long()
 
-        padding_mask = torch.cat((video_mask, text_mask), dim=1).unsqueeze(
-            1
-        )  # for heads dimension and query dimension # (B,  1, L)
+        if with_video:
+            padding_mask = torch.cat((video_mask, text_mask), dim=1).unsqueeze(
+                1
+            )  # for heads dimension and query dimension # (B,  1, L)
+        else:
+            padding_mask = text_mask.unsqueeze(1)
 
         # Generate causal mask
-        causal_mask = torch.triu(
+        text_casual_mask = torch.triu(
             torch.ones((max_text_length, max_text_length)),
             diagonal=1,
         ).to(video_mask.device)
-        causal_mask = torch.where(causal_mask == 1, 0, 1)
-        casual_mask = F.pad(
-            causal_mask, (max_video_length, 0, max_video_length, 0), value=1
-        )
+        text_casual_mask = torch.where(text_casual_mask == 1, 0, 1)
+        if with_video:
+            casual_mask = F.pad(
+                text_casual_mask, (max_video_length, 0, max_video_length, 0), value=1
+            )
+        else:
+            casual_mask = text_casual_mask
+
         return padding_mask * casual_mask
 
-    def _forward(self, module, video, video_length, text_ids, text_length):
-        with torch.no_grad():
-            visual_encoder_outputs = module.visual_encoder(video, video_length)
+    def _forward(
+        self, module, video, video_length, text_ids, text_length, with_video=True
+    ):
+        if with_video:
+            with torch.no_grad():
+                visual_encoder_outputs = module.visual_encoder(video, video_length)
 
-        hidden_state = visual_encoder_outputs.hidden_state
-        v_length = visual_encoder_outputs.video_length
-        visual_embeddings = module.visual_adapter(hidden_state)  # b t c
+            hidden_state = visual_encoder_outputs.hidden_state
+            v_length = visual_encoder_outputs.video_length
+            visual_embeddings = module.visual_adapter(hidden_state)  # b t c
+            B, T, C = visual_embeddings.shape
 
         with torch.no_grad():
             textaul_embeddings = module.shared_encoder.get_input_embeddings()(
                 text_ids
             )  # b l c
 
-        B, T, C = visual_embeddings.shape
         _, L, _ = textaul_embeddings.shape
 
-        assert T == v_length.max().item(), (
-            f"Visual length {T} does not match max video length {v_length.max().item()}"
-        )
+        if with_video:
+            assert T == v_length.max().item(), (
+                f"Visual length {T} does not match max video length {v_length.max().item()}"
+            )
         assert L == text_length.max().item(), (
             f"Text length {L} does not match max text length {text_length.max().item()}"
         )
@@ -163,15 +180,27 @@ class VTGHandle(BaseHandle):
         padding_attention_casual = self.generate_padding_casual_attention_mask(
             v_length, text_length
         )
-        features = torch.cat((visual_embeddings, textaul_embeddings), dim=1)  # b t+l c
 
-        out_features = module.shared_encoder(
+        if with_video:
+            features = torch.cat(
+                (visual_embeddings, textaul_embeddings), dim=1
+            )  # b t+l c
+        else:
+            features = textaul_embeddings
+
+        bert_output = module.shared_encoder(
             inputs_embeds=features,
             attention_mask=padding_attention_casual,
+            output_attentions=True,
         )
-        out_features = out_features.last_hidden_state[:, T:, :]
+
+        if with_video:
+            out_features = bert_output.last_hidden_state[:, T:, :]
+        else:
+            out_features = bert_output.last_hidden_state
+
         out_logit = module.shared_encoder_header(out_features)  # b l vocab_size
-        return out_logit
+        return out_logit, bert_output.attentions
 
     def train_step(self, module: lightning, batch, batch_idx):
         ids, video, video_length, text = self.dispatch_batch(batch, module.device)
@@ -179,28 +208,20 @@ class VTGHandle(BaseHandle):
             text, module.tokenizer, module.device
         )
 
-        # Validate lengths
-        if (video_length == 0).any() or (text_length == 0).any():
-            raise ValueError("Zero-length sequences detected in batch")
-
-        # Validate labels
-        if (labels >= self.vocab_size).any():
-            raise ValueError(f"Label values exceed vocab size {self.vocab_size}")
-
-        out_logit = self._forward(module, video, video_length, text_ids, text_length)
+        out_logit, _ = self._forward(module, video, video_length, text_ids, text_length)
+        out_logit_text_only, _ = self._forward(
+            module, video, video_length, text_ids, text_length, with_video=False
+        )
 
         # Add numerical stability
         out_loglogit = F.log_softmax(out_logit, dim=-1)
-
-        if torch.isnan(out_loglogit).any():
-            raise ValueError("NaN detected in log probabilities")
 
         self.train_accu.update(
             rearrange(out_loglogit, "b l c -> (b l) c"),
             rearrange(labels, "b l -> (b l)"),
         )
 
-        loss = (
+        target_loss = (
             F.nll_loss(
                 rearrange(out_loglogit, "b l c -> (b l) c"),
                 rearrange(labels, "b l -> (b l)"),
@@ -209,11 +230,23 @@ class VTGHandle(BaseHandle):
             * self.loss_weight
         )
 
-        if torch.isnan(loss):
-            raise ValueError("NaN loss detected")
+        mask = torch.arange(text_ids.size(1), device=text_length.device).expand(
+            len(text_length),
+            text_ids.size(1) < text_length.unsqueeze(1),
+        )
+        mask = mask.flatten()
+        js_loss = (
+            js_inverted_loss_from_log_probs(
+                rearrange(out_loglogit, "b l c -> (b l) c"),
+                rearrange(labels, "b l -> (b l)"),
+                mask=mask,
+            )
+            * self.js_weight
+        )
 
-        module.log("train_generate_loss", loss, prog_bar=True)
-        return loss
+        module.log("train_generate_loss", target_loss, prog_bar=True)
+        module.log("train_generate_js_loss", js_loss, prog_bar=True)
+        return target_loss + js_loss
 
     def validation_step(self, module: lightning, batch, batch_idx):
         ids, video, video_length, text = self.dispatch_batch(batch, module.device)

@@ -66,7 +66,9 @@ class SLTModel(LightningModule):
         self.handles = nn.ModuleDict()
 
         if self.vtg_flag:
-            self.handles["vtg"] = VTGHandle(self.vocab_size, self.cfg.vtg_weight)
+            self.handles["vtg"] = VTGHandle(
+                self.vocab_size, self.cfg.vtg_weight, self.cfg.vtg_js_weight
+            )
             self.vtg_weight = self.cfg.vtg_weight
 
         if self.vtm_flag:
