@@ -11,7 +11,6 @@ from collections import OrderedDict
 
 from transformers.models.bert.modeling_bert import BertModel, BertConfig
 from transformers.models.gemma3 import Gemma3ForCausalLM, Gemma3ForConditionalGeneration
-from transformers import AutoModel
 
 from .handles.vtg_handle import VTGHandle
 from .handles.vtm_handle import VTMHandle
@@ -171,6 +170,79 @@ class SLTModel(LightningModule):
                 del checkpoint[name]
             if name.startswith("visual_encoder"):
                 del checkpoint[name]
+
+    def generate(
+        self,
+        video: torch.Tensor,
+        video_length: torch.Tensor,
+        max_length: Optional[int] = 30,
+    ):
+        """
+        @param video: (batch_size, seq_len, 3, h, w)
+        """
+        B, T, C, H, W = video.shape
+        device = video.device
+
+        # Create video mask
+        video_mask = torch.arange(T, device=device).expand(
+            B, T
+        ) < video_length.unsqueeze(1)
+        video_mask = video_mask.long()
+
+        with torch.no_grad():
+            # Process visual inputs
+            visual_outputs = self.visual_encoder(video, video_length)
+            visual_embeddings = self.visual_adapter(visual_outputs.hidden_state)
+
+            # Prepare initial inputs with CLS token
+            cls_embeddings = self.shared_encoder.get_input_embeddings()(
+                torch.full((B, 1), self.tokenizer.cls_token_id, device=device)
+            )
+            inputs = torch.cat((visual_embeddings, cls_embeddings), dim=1)
+            attn_mask = torch.cat(
+                (video_mask, torch.ones((B, 1), device=device)), dim=1
+            )
+
+            # Initialize generation state
+            output = []
+            unfinished = torch.ones(B, dtype=torch.bool, device=device)
+
+            for _ in range(max_length):
+                if not unfinished.any():
+                    break
+
+                # Forward pass
+                out_features = self.shared_encoder(
+                    inputs_embeds=inputs,
+                    attention_mask=attn_mask,
+                )
+
+                # Get next token predictions
+                logits = self.shared_encoder_header(
+                    out_features.last_hidden_state[:, -1:]
+                )
+                next_tokens = torch.argmax(logits, dim=-1)  # Greedy decoding
+
+                # Update unfinished sequences
+                unfinished = unfinished & (
+                    next_tokens.squeeze() != self.tokenizer.sep_token_id
+                )
+                output.append(next_tokens)
+
+                # Prepare next inputs
+                inputs = torch.cat(
+                    (inputs, self.shared_encoder.get_input_embeddings()(next_tokens)),
+                    dim=1,
+                )
+                attn_mask = torch.cat(
+                    (attn_mask, unfinished.unsqueeze(-1).long()), dim=1
+                )
+
+            return (
+                torch.cat(output, dim=1)
+                if len(output) > 0
+                else torch.empty(B, 0, device=device)
+            )
 
 
 if __name__ == "__main__":

@@ -14,3 +14,5 @@ model = Gemma3ForCausalLM.from_pretrained(
     device_map="cuda:0",
     torch_dtype=torch.float16,
 ).eval()
+
+prompt = "hello words, this is a test. "
