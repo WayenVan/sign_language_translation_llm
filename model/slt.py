@@ -164,6 +164,9 @@ class SLTModel(LightningModule):
         for name, handle in self.handles.items():
             handle.train_handle(self, is_train)
 
+    def forward(self, is_train):
+        pass
+
     def configure_optimizers(self):
         opt: Optimizer = instantiate(
             self.cfg.engine.optimizer,
