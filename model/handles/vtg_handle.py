@@ -17,10 +17,11 @@ class VTGHandle(BaseHandle):
         self,
         vocab_size,
         loss_weight,
-        vtg_js_weight,
+        js_weight,
     ):
         super().__init__()
         self.loss_weight = loss_weight
+        self.js_weight = js_weight
         self.vocab_size = vocab_size
 
         self.train_accu = Accuracy(
