@@ -8,6 +8,7 @@ import logging
 from typing import Optional, List
 from einops import rearrange
 from collections import OrderedDict
+import numpy as np
 
 from transformers.models.bert.modeling_bert import BertModel, BertConfig
 from transformers.models.gemma3 import Gemma3ForCausalLM, Gemma3ForConditionalGeneration
@@ -35,6 +36,8 @@ class SLTModel(LightningModule):
         self.vtm_flag = getattr(self.cfg, "vtm_flag", False)
         self.vtc_flag = getattr(self.cfg, "vtc_flag", False)
         self.pl_flag = getattr(self.cfg, "pl_flag", False)
+
+        self.contrastive_logit_scale = nn.Parameter(torch.ones([]) * np.log(1 / 0.07))
 
         self._create_llm()
         self._create_layers()
@@ -70,8 +73,8 @@ class SLTModel(LightningModule):
             self.handles["vtg"] = VTGHandle(
                 self.vocab_size,
                 self.cfg.vtg_weight,
-                self.cfg.vtg_js_weight,
                 self.tokenizer,
+                self.cfg.vtg_mask_ratio,
             )
             self.vtg_weight = self.cfg.vtg_weight
 
@@ -113,6 +116,9 @@ class SLTModel(LightningModule):
         self.visual_encoder.eval()
 
     def _create_bert_shared_encoder(self):
+        self.hidden_size = self.shared_encoder.config.hidden_size
+        self.video_cls_token = torch.nn.Parameter(torch.randn(1, 1, self.hidden_size))
+
         self.shared_encoder = BertModel.from_pretrained(
             self.cfg.modules.bert_shared_encoder_id,
             device_map="cpu",

@@ -11,7 +11,7 @@ engine:
   optmizer:
     lr: 1e-4
 
-vtg_flag: False
+vtg_flag: True
 vtg_weight: 1.0
 vtg_mask_ratio: 0.40
 

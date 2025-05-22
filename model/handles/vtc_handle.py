@@ -3,7 +3,9 @@ from .base_handle import BaseHandle
 from torch.nn import functional as F
 from torchmetrics import Accuracy
 from einops import rearrange, repeat
-from misc.contrastive_loss import masked_bi_directional_contrastive_loss
+from misc.clip_loss import clip_loss
+from typing import List
+from misc.circular_queue import CircularQueue
 
 
 class VTCHandle(BaseHandle):
@@ -11,9 +13,12 @@ class VTCHandle(BaseHandle):
     Handles the model hooks for the VTM task.
     """
 
-    def __init__(self, loss_weight):
+    def __init__(self, loss_weight, hiddent_size, queue_max_size, device, dtype):
         super().__init__()
         self.loss_weight = loss_weight
+
+        self.visual_queue = CircularQueue(queue_max_size, hiddent_size, device, dtype)
+        self.text_queue = CircularQueue(queue_max_size, hiddent_size, device, dtype)
 
     def dispatch_batch(self, batch, device):
         ids = batch["ids"]
@@ -64,16 +69,34 @@ class VTCHandle(BaseHandle):
 
         return padding_mask * forbidden_mask
 
-    def _forward(self, module, video, video_length, text):
-        tokenizer_outputs = module.tokenizer(
-            text,
-            return_tensors="pt",
-            padding=True,
-            add_special_tokens=False,  # NOTE: <CLs> and <SEP> is deleted
-        )
-        text_ids = tokenizer_outputs["input_ids"].to(module.device)  # (B, L)
-        text_length = tokenizer_outputs["attention_mask"].sum(1).to(module.device)
+    def tokenize(self, text: List[str], tokenizer, device):
+        """
+        Tokenize the text using the tokenizer.
+        """
+        input_ids = []
+        for setence in text:
+            tokenized = tokenizer.tokenize(
+                setence,
+            )
+            tokenized = tokenizer.convert_tokens_to_ids(tokenized)
+            intput = [tokenizer.cls_token_id] + tokenized
 
+            input_ids.append(intput)
+
+        input_outputs = tokenizer.pad(
+            {"input_ids": input_ids},
+            padding="longest",
+            return_attention_mask=True,
+        )
+
+        return (
+            torch.LongTensor(input_outputs["input_ids"]).to(device),
+            torch.LongTensor(input_outputs["attention_mask"])
+            .sum(dim=1)
+            .to(device),  # (B), text length
+        )
+
+    def _forward(self, module, video, video_length, text_ids, text_length):
         with torch.no_grad():
             visual_encoder_outputs = module.visual_encoder(video, video_length)
         hidden_state = visual_encoder_outputs.hidden_state
@@ -95,6 +118,12 @@ class VTCHandle(BaseHandle):
             f"Text length {L} does not match max text length {text_length.max().item()}"
         )
 
+        # NOTE: add visual cls token to the model
+        visual_embeddings = torch.cat(
+            (module.video_cls_token.expand(B, T, -1), visual_embeddings), dim=1
+        )
+        v_length = v_length + 1
+
         # 5. 生成注意力掩码
         padding_attention_mask = self.generate_padding_attention_mask(
             v_length, text_length
@@ -105,44 +134,60 @@ class VTCHandle(BaseHandle):
             inputs_embeds=features,
             attention_mask=padding_attention_mask,
         )
-        text_out_features = out_features.last_hidden_state[:, T:, :]
-        visual_out_features = out_features.last_hidden_state[:, :T, :]
+        text_cls_feature = out_features.last_hidden_state[:, T, :]
+        visual_cls_feature = out_features.last_hidden_state[:, 0, :]
 
-        return text_out_features, visual_out_features, text_length
+        return visual_cls_feature, text_cls_feature, text_length
 
     def train_step(self, module, batch, batch_idx):
         ids, video, video_length, text = self.dispatch_batch(batch, module.device)
-
+        text_ids, text_length = self.tokenize(text, module.tokenizer, module.device)
         text_out_features, visual_out_features, text_length = self._forward(
-            module, video, video_length, text
+            module, video, video_length, text_ids, text_length
+        )
+
+        # NOTE: get cached viual text pair from the queue
+        total_visual_logits = torch.cat(
+            [visual_out_features, self.visual_queue.get_queue()], dim=0
+        )
+        total_text_logits = torch.cat(
+            [text_out_features, self.text_queue.get_queue()], dim=0
         )
 
         # WARN: in case all labels are -100, the loss will be 0, impossible situation
         # because the mask_token will reproduce if no token is masked
         loss = (
-            masked_bi_directional_contrastive_loss(
-                visual_out_features, text_out_features, video_length, text_length
+            clip_loss(
+                total_visual_logits,
+                total_text_logits,
+                module.contrastive_logit_scale,
             )
             * self.loss_weight
         )
 
         module.log("train_contrastive_loss", loss, prog_bar=True)
 
+        # NOTE: put the pairs into the queue
+        self.visual_queue.enqueue(visual_out_features.detach())
+        self.text_queue.enqueue(text_out_features.detach())
+
         return loss
 
     def validation_step(self, module, batch, batch_idx):
         ids, video, video_length, text = self.dispatch_batch(batch, module.device)
-
+        text_ids, text_length = self.tokenize(text, module.tokenizer, module.device)
         text_out_features, visual_out_features, text_length = self._forward(
-            module, video, video_length, text
+            module, video, video_length, text_ids, text_length
         )
 
         with torch.no_grad():
             # WARN: in case all labels are -100, the loss will be 0, impossible situation
             # because the mask_token will reproduce if no token is masked
             loss = (
-                masked_bi_directional_contrastive_loss(
-                    visual_out_features, text_out_features, video_length, text_length
+                clip_loss(
+                    visual_out_features,
+                    text_out_features,
+                    module.contrastive_logit_scale,
                 )
                 * self.loss_weight
             )

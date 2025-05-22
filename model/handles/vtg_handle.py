@@ -17,15 +17,13 @@ class VTGHandle(BaseHandle):
         self,
         vocab_size,
         loss_weight,
-        js_weight,
         tokenizer,
         mask_ratio,
     ):
         super().__init__()
         self.loss_weight = loss_weight
-        self.js_weight = js_weight
         self.vocab_size = vocab_size
-        self.mask_ratio = 0.15
+        self.mask_ratio = mask_ratio
 
         self.train_accu = Accuracy(
             task="multiclass",
