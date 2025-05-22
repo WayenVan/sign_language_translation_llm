@@ -11,12 +11,12 @@ engine:
   optmizer:
     lr: 1e-4
 
-vtg_flag: True
+vtg_flag: False
 vtg_weight: 1.0
-vtg_js_weight: 1.0
+vtg_mask_ratio: 0.40
 
-vtm_flag: False
-vtm_mask_ratio: 0.40
+vtm_flag: True
+vtm_mask_ratio: 0.8
 vtm_weight: 1.0
 
 vtc_flag: False

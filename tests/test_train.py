@@ -95,6 +95,12 @@ class DebugCallback(callbacks.Callback):
         # NOTE: check the gradient norm
         #
         for name, param in pl_module.named_parameters():
+            if (
+                name
+                == "shared_encoder.embeddings.word_embeddings.new_embeddings.weight"
+            ):
+                logging.info({param.grad.mean()})
+
             if param.grad is None:
                 continue
             logging.info(f"Param {name} has  mean: {param.mean()}, std: {param.std()}")

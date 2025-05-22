@@ -5,7 +5,7 @@ from torch.nn import functional as F
 from typing import List
 from einops import rearrange
 from torchmetrics import Accuracy
-from misc.js_loss import js_inverted_loss_from_log_probs
+from transformers import DataCollatorForWholeWordMask
 
 
 class VTGHandle(BaseHandle):
@@ -18,11 +18,14 @@ class VTGHandle(BaseHandle):
         vocab_size,
         loss_weight,
         js_weight,
+        tokenizer,
+        mask_ratio,
     ):
         super().__init__()
         self.loss_weight = loss_weight
         self.js_weight = js_weight
         self.vocab_size = vocab_size
+        self.mask_ratio = 0.15
 
         self.train_accu = Accuracy(
             task="multiclass",
@@ -34,6 +37,9 @@ class VTGHandle(BaseHandle):
             task="multiclass",
             num_classes=self.vocab_size,
             ignore_index=0,  # paddding index
+        )
+        self.collator = DataCollatorForWholeWordMask(
+            tokenizer=tokenizer, mlm=True, mlm_probability=mask_ratio
         )
 
     def dispatch_batch(self, batch, device):
@@ -60,28 +66,31 @@ class VTGHandle(BaseHandle):
         module.log("val_generate_accu", val_acc, prog_bar=True, sync_dist=True)
         self.val_accu.reset()
 
-    @staticmethod
-    def tokenize(text: List[str], tokenizer, device):
+    def tokenize(self, text: List[str], tokenizer, device, use_mask=True):
         """
         Tokenize the text using the tokenizer.
         """
         labels_ids = []
-        intput_ids = []
+        input_ids = []
         for setence in text:
             tokenized = tokenizer.tokenize(
                 setence,
             )
             tokenized = tokenizer.convert_tokens_to_ids(tokenized)
-            label = tokenized + [tokenizer.sep_token_id]
-            intput = [tokenizer.cls_token_id] + tokenized
+            label = tokenized + [tokenizer.eos_token_id]
+            intput = [tokenizer.bos_token_id] + tokenized
+
             labels_ids.append(label)
-            intput_ids.append(intput)
+            input_ids.append(intput)
 
         input_outputs = tokenizer.pad(
-            {"input_ids": intput_ids},
+            {"input_ids": input_ids},
             padding="longest",
             return_attention_mask=True,
         )
+        if use_mask:
+            input_outputs["input_ids"] = self.collator(input_ids)["input_ids"]
+
         label_outputs = tokenizer.pad(
             {"input_ids": labels_ids},
             padding="longest",
@@ -142,9 +151,8 @@ class VTGHandle(BaseHandle):
         ).to(video_mask.device)
         text_casual_mask = torch.where(text_casual_mask == 1, 0, 1)
         if with_video:
-            casual_mask = F.pad(
-                text_casual_mask, (max_video_length, 0, max_video_length, 0), value=1
-            )
+            casual_mask = F.pad(text_casual_mask, (0, 0, max_video_length, 0), value=0)
+            casual_mask = F.pad(casual_mask, (max_video_length, 0, 0, 0), value=1)
         else:
             casual_mask = text_casual_mask
 
@@ -171,10 +179,9 @@ class VTGHandle(BaseHandle):
         else:
             v_length = video_length
 
-        with torch.no_grad():
-            textaul_embeddings = module.shared_encoder.get_input_embeddings()(
-                text_ids
-            )  # b l c
+        textaul_embeddings = module.shared_encoder.get_input_embeddings()(
+            text_ids
+        )  # b l c
 
         _, L, _ = textaul_embeddings.shape
 
@@ -215,13 +222,10 @@ class VTGHandle(BaseHandle):
     def train_step(self, module: lightning, batch, batch_idx):
         ids, video, video_length, text = self.dispatch_batch(batch, module.device)
         text_ids, labels, text_length = self.tokenize(
-            text, module.tokenizer, module.device
+            text, module.tokenizer, module.device, use_mask=True
         )
 
         out_logit, _ = self._forward(module, video, video_length, text_ids, text_length)
-        out_logit_text_only, _ = self._forward(
-            module, video, video_length, text_ids, text_length, with_video=False
-        )
 
         # Add numerical stability
         out_loglogit = F.log_softmax(out_logit, dim=-1)
@@ -239,31 +243,14 @@ class VTGHandle(BaseHandle):
             )
             * self.loss_weight
         )
-
-        mask = torch.arange(text_ids.shape[1], device=text_length.device).expand(
-            len(text_length), text_ids.shape[1]
-        ) < text_length.unsqueeze(1)
-        mask = mask.flatten()
-        js_loss = (
-            js_inverted_loss_from_log_probs(
-                rearrange(out_loglogit, "b l c -> (b l) c"),
-                rearrange(
-                    F.log_softmax(out_logit_text_only, dim=-1), "b l c -> (b l) c"
-                ),
-                mask=mask,
-            )
-            * self.js_weight
-        )
-
         module.log("train_generate_loss", target_loss, prog_bar=True)
-        module.log("train_generate_js_loss", js_loss, prog_bar=True)
-        return target_loss + js_loss
+        return target_loss
 
     def validation_step(self, module: lightning, batch, batch_idx):
         ids, video, video_length, text = self.dispatch_batch(batch, module.device)
 
         text_ids, labels, text_length = self.tokenize(
-            text, module.tokenizer, module.device
+            text, module.tokenizer, module.device, use_mask=False
         )
 
         out_logit, _ = self._forward(module, video, video_length, text_ids, text_length)

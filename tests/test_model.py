@@ -7,32 +7,37 @@ from hydra import compose, initialize
 import torch
 
 
+def test_slt_model_inspect():
+    import polars as pl
+
+    initialize(config_path="../configs")
+    cfg = compose("initial_train")
+    cfg.data.batch_size = 2
+    data_module = Ph14TDataModule(cfg)
+    data_module.setup()
+    model = SLTModel(
+        cfg=cfg,
+    )
+    for name, param in model.named_parameters():
+        print(name)
+        print(param.requires_grad)
+
+
 def test_slt_model():
     import polars as pl
 
     initialize(config_path="../configs")
-    cfg = compose("prompt_learning")
-    model = SLTModel(cfg).cuda()
-
-    df = pl.read_csv("outputs/keywords/train-extracted-keywords.csv", separator="|")
-
-    kws = []
-    for keywords in df["keywords"]:
-        kws.append(keywords)
-        if len(kws) >= 2:
-            break
-
-    batch = {
-        "ids": torch.tensor([0, 1]).cuda(),
-        "names": kws,
-        "keywords": kws,
-        "video": torch.randn(2, 20, 3, 224, 224).cuda(),
-        "video_length": torch.tensor([20, 16]).cuda(),
-    }
-    engines = model.configure_optimizers()
-
-    model.training_step(batch, 0)
-    model.validation_step(batch, 0)
+    cfg = compose("initial_train")
+    cfg.data.batch_size = 2
+    data_module = Ph14TDataModule(cfg)
+    data_module.setup()
+    model = SLTModel(
+        cfg=cfg,
+    ).cuda()
+    loader = data_module.train_dataloader()
+    for i, batch in enumerate(loader):
+        model.training_step(batch, 0)
+        model.validation_step(batch, 0)
 
 
 def test_slt_model_generation():
@@ -42,7 +47,7 @@ def test_slt_model_generation():
     data_module = Ph14TDataModule(cfg)
     data_module.setup()
     model = SLTModel.load_from_checkpoint(
-        "/root/projects/slt_set_llms/outputs/train/2025-05-18_19-58-41/epoch=epoch=55-wer=val_generate_accu=0.76.ckpt",
+        "outputs/train/2025-05-20_23-18-04/last.ckpt",
         strict=False,
         cfg=cfg,
     )
@@ -54,15 +59,20 @@ def test_slt_model_generation():
         video = batch["video"].to(model.device)
         video_length = batch["video_length"].to(model.device)
         text = batch["text"]
+        text_ids = model.tokenizer(text)
+        # print(text_ids)
         print(text)
 
         # Generate
         generated_ids = model.generate(video, video_length, 20)
-        print(generated_ids)
+
+        for item in generated_ids.cpu().tolist():
+            print(model.tokenizer.decode(item, skip_special_tokens=True))
 
         break
 
 
 if __name__ == "__main__":
-    # test_slt_model()
-    test_slt_model_generation()
+    test_slt_model()
+    # test_slt_model_inspect()
+    # test_slt_model_generation()

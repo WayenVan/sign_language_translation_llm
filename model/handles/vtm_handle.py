@@ -4,6 +4,7 @@ from .base_handle import BaseHandle
 from torch.nn import functional as F
 from torchmetrics import Accuracy
 from einops import rearrange
+from transformers import DataCollatorForWholeWordMask
 
 
 class VTMHandle(BaseHandle):
@@ -11,7 +12,7 @@ class VTMHandle(BaseHandle):
     Handles the model hooks for the VTM task.
     """
 
-    def __init__(self, vocab_size, loss_weight, mask_ratio=0.15):
+    def __init__(self, tokenizer, vocab_size, loss_weight, mask_ratio=0.15):
         super().__init__()
         self.mask_ratio = mask_ratio
 
@@ -22,6 +23,9 @@ class VTMHandle(BaseHandle):
             task="multiclass", num_classes=vocab_size, ignore_index=-100
         )
         self.loss_weight = loss_weight
+        self.collator = DataCollatorForWholeWordMask(
+            tokenizer=tokenizer, mlm=True, mlm_probability=mask_ratio
+        )
 
     def dispatch_batch(self, batch, device):
         ids = batch["ids"]
@@ -74,73 +78,22 @@ class VTMHandle(BaseHandle):
             1
         )  # for heads dimension and query dimension # (B,  1, L)
 
-    @staticmethod
-    def mask_tokens(
-        input_ids, tokenizer, mlm_prob=0.15, mask_prob=0.8, random_prob=0.1
-    ):
-        labels = input_ids.clone()
-        special = torch.tensor(
-            # [tokenizer.cls_token_id, tokenizer.sep_token_id, tokenizer.pad_token_id],
-            [tokenizer.cls_token_id, tokenizer.sep_token_id, tokenizer.pad_token_id],
-            device=input_ids.device,
-        )
-        maskable = ~((input_ids.unsqueeze(-1) == special).any(-1))
-
-        # Keep sampling until at least one token is maskable
-        while True:
-            probs = (
-                torch.full(input_ids.shape, mlm_prob, device=input_ids.device)
-                * maskable.float()
-            )
-            masked = torch.bernoulli(probs).bool()
-
-            if masked.any() or not maskable.any():
-                break
-
-        labels[~masked] = -100
-
-        # Rest of original masking logic remains the same
-        indices_replaced = (
-            torch.bernoulli(
-                torch.full(input_ids.shape, mask_prob, device=input_ids.device)
-            ).bool()
-            & masked
-        )
-        input_ids[indices_replaced] = tokenizer.mask_token_id
-
-        indices_random = (
-            torch.bernoulli(
-                torch.full(
-                    input_ids.shape,
-                    random_prob / (1 - mask_prob),
-                    device=input_ids.device,
-                )
-            ).bool()
-            & masked
-            & ~indices_replaced
-        )
-        input_ids[indices_random] = torch.randint(
-            tokenizer.vocab_size, input_ids.shape, device=input_ids.device
-        )[indices_random]
-
-        return input_ids, labels
-
-    def _forward(self, module, video, video_length, text):
+    def _forward(self, module, video, video_length, text, output_attentions=False):
         tokenizer_outputs = module.tokenizer(
             text,
             return_tensors="pt",
             padding=True,
-            # add_special_tokens=False,  # NOTE: <CLs> and <SEP> will be added by the model
+            add_special_tokens=False,  # NOTE: <CLs> and <SEP> will be added by the model
         )
         text_ids = tokenizer_outputs["input_ids"].to(module.device)  # (B, L)
         text_length = tokenizer_outputs["attention_mask"].sum(1).to(module.device)
 
-        with torch.no_grad():
-            masked_text_ids, mask_text_labels = self.mask_tokens(
-                text_ids,
-                module.tokenizer,
-                mlm_prob=self.mask_ratio,
-            )
+        # NOTE: masking the text token by data collator
+        masked_output = self.collator(text_ids.cpu().tolist())
+        masked_text_ids, mask_text_labels = (
+            masked_output["input_ids"].to(module.device),
+            masked_output["labels"].to(module.device),
+        )
 
         with torch.no_grad():
             visual_encoder_outputs = module.visual_encoder(video, video_length)
@@ -172,7 +125,7 @@ class VTMHandle(BaseHandle):
         bert_output = module.shared_encoder(
             inputs_embeds=features,
             attention_mask=padding_attention_mask,
-            output_attentions=True,
+            output_attentions=output_attentions,
         )
         out_features = bert_output.last_hidden_state[:, T:, :]
         out_logit = module.shared_encoder_header(out_features)  # b l vocab_size
@@ -217,7 +170,9 @@ class VTMHandle(BaseHandle):
     def validation_step(self, module, batch, batch_idx):
         ids, video, video_length, text = self.dispatch_batch(batch, module.device)
 
-        out_logit, mask_text_labels = self._forward(module, video, video_length, text)
+        out_logit, mask_text_labels, _ = self._forward(
+            module, video, video_length, text
+        )
 
         self.val_accu.update(
             rearrange(out_logit, "b l c -> (b l) c"),

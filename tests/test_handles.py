@@ -17,7 +17,7 @@ def test_vtm_handle_mask():
 
 def test_vtg_handle_mask():
     mask = VTGHandle.generate_padding_casual_attention_mask(
-        torch.tensor([5, 3]), torch.tensor([4, 2]), with_video=False
+        torch.tensor([5, 3]), torch.tensor([4, 2]), with_video=True
     )
     print(mask)
     print(mask.shape)  # Should be (2,  1, 12)
@@ -32,5 +32,6 @@ def test_vtc_handle_mask():
 
 if __name__ == "__main__":
     # test_handle()
-    test_vtg_handle_mask()
+    # test_vtg_handle_mask()
     # test_vtc_handle_mask()
+    test_vtm_handle_mask()

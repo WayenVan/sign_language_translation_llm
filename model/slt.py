@@ -11,6 +11,7 @@ from collections import OrderedDict
 
 from transformers.models.bert.modeling_bert import BertModel, BertConfig
 from transformers.models.gemma3 import Gemma3ForCausalLM, Gemma3ForConditionalGeneration
+from modules.extended_embeddings import CustomEmbeddingLayer
 
 from .handles.vtg_handle import VTGHandle
 from .handles.vtm_handle import VTMHandle
@@ -67,13 +68,18 @@ class SLTModel(LightningModule):
 
         if self.vtg_flag:
             self.handles["vtg"] = VTGHandle(
-                self.vocab_size, self.cfg.vtg_weight, self.cfg.vtg_js_weight
+                self.vocab_size,
+                self.cfg.vtg_weight,
+                self.cfg.vtg_js_weight,
+                self.tokenizer,
             )
             self.vtg_weight = self.cfg.vtg_weight
 
         if self.vtm_flag:
             self.handles["vtm"] = VTMHandle(
+                self.tokenizer,
                 self.vocab_size,
+                self.cfg.vtm_weight,
                 self.cfg.vtm_mask_ratio,
             )
             self.vtm_weight = self.cfg.vtm_weight
@@ -112,25 +118,53 @@ class SLTModel(LightningModule):
             device_map="cpu",
             torch_dtype=torch.float32,
         )
+        # NOTE: add bos and eos token
         self.tokenizer = AutoTokenizer.from_pretrained(
             self.cfg.modules.bert_shared_encoder_id,
             use_fast=True,
         )
+
+        old_vocab_size = self.tokenizer.vocab_size
         self.tokenizer.padding_side = "right"
+        self.tokenizer.add_special_tokens(
+            {
+                "bos_token": "[BOS]",
+                "eos_token": "[EOS]",
+            }
+        )
+        self.shared_encoder.resize_token_embeddings(self.tokenizer.vocab_size)
+        new_vocab_size = len(self.tokenizer)
+        pretrained_weights = self.shared_encoder.get_input_embeddings().weight
+        padding_idx = self.tokenizer.pad_token_id
+        # NOTE: createa a new embeeding layer for bert
+        self.shared_encoder.embeddings.word_embeddings = CustomEmbeddingLayer(
+            old_vocab_size,
+            2,
+            self.shared_encoder.config.hidden_size,
+            padding_idx,
+            pretrained_weights,
+        )
 
         self.bert_config = AutoConfig.from_pretrained(
             self.cfg.modules.bert_shared_encoder_id,
         )
-        self.vocab_size = self.bert_config.vocab_size
+
+        self.vocab_size = new_vocab_size
+        assert self.vocab_size == self.bert_config.vocab_size + 2, (
+            f"Vocab size {self.vocab_size} does not match bert config vocab size {self.bert_config.vocab_size}"
+        )
         self.shared_encoder_header = nn.Linear(
             self.bert_config.hidden_size,
             self.vocab_size,  # WARN: be careful with the vocab size and len(tokenizer)
         )
 
-        # NOTE: freeze all the embedding model in the layer
+        # NOTE: freeze all the embedding model in the layer, but not the new one
         for paras in self.shared_encoder.embeddings.parameters():
             paras.requires_grad = False
-        self.shared_encoder.embeddings.eval()
+        for (
+            paras
+        ) in self.shared_encoder.embeddings.word_embeddings.new_embeddings.parameters():
+            paras.requires_grad = True
 
     def training_step(self, batch, batch_idx):
         losses = OrderedDict()
@@ -209,10 +243,10 @@ class SLTModel(LightningModule):
             visual_embeddings = self.visual_adapter(visual_outputs.hidden_state)
 
             # Prepare initial inputs with CLS token
-            cls_embeddings = self.shared_encoder.get_input_embeddings()(
-                torch.full((B, 1), self.tokenizer.cls_token_id, device=device)
+            bos_embeddings = self.shared_encoder.get_input_embeddings()(
+                torch.full((B, 1), self.tokenizer.bos_token_id, device=device)
             )
-            inputs = torch.cat((visual_embeddings, cls_embeddings), dim=1)
+            inputs = torch.cat((visual_embeddings, bos_embeddings), dim=1)
             attn_mask = torch.cat(
                 (video_mask, torch.ones((B, 1), device=device)), dim=1
             )
@@ -239,7 +273,7 @@ class SLTModel(LightningModule):
 
                 # Update unfinished sequences
                 unfinished = unfinished & (
-                    next_tokens.squeeze() != self.tokenizer.sep_token_id
+                    next_tokens.squeeze() != self.tokenizer.eos_token_id
                 )
                 output.append(next_tokens)
 
