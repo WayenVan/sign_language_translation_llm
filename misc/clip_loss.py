@@ -1,5 +1,6 @@
 import torch
 import torch.nn.functional as F
+import math
 
 
 def clip_loss(
@@ -31,6 +32,9 @@ def clip_loss(
     elif isinstance(logit_scale, float):
         logit_scale = torch.tensor(logit_scale).to(image_features.device)
 
+    # Clamp logit_scale to prevent numerical overflow
+    logit_scale.clamp(min=math.log(1), max=math.log(100)).exp()
+
     logits_per_image = logits_per_image * logit_scale
     logits_per_text = logits_per_text * logit_scale
 
@@ -42,3 +46,4 @@ def clip_loss(
     loss_t2i = F.cross_entropy(logits_per_text, ground_truth)
 
     return (loss_i2t + loss_t2i) / 2
+
