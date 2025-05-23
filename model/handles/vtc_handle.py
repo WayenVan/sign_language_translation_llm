@@ -4,7 +4,7 @@ from torch.nn import functional as F
 from torchmetrics import Accuracy
 from einops import rearrange, repeat
 from misc.clip_loss import clip_loss
-from typing import List
+from typing import List, override
 from misc.circular_queue import CircularQueue
 
 
@@ -13,12 +13,21 @@ class VTCHandle(BaseHandle):
     Handles the model hooks for the VTM task.
     """
 
-    def __init__(self, loss_weight, hiddent_size, queue_max_size, device, dtype):
+    def __init__(self, loss_weight, hiddent_size, queue_max_size):
         super().__init__()
         self.loss_weight = loss_weight
+        self.queue_max_size = queue_max_size
+        self.hiddent_size = hiddent_size
+        self.queue_initialized = False
 
-        self.visual_queue = CircularQueue(queue_max_size, hiddent_size, device, dtype)
-        self.text_queue = CircularQueue(queue_max_size, hiddent_size, device, dtype)
+    def _initiate_queue(self, device, dtype):
+        self.visual_queue = CircularQueue(
+            self.queue_max_size, self.hiddent_size, device, dtype
+        )
+        self.text_queue = CircularQueue(
+            self.queue_max_size, self.hiddent_size, device, dtype
+        )
+        self.queue_initialized = True
 
     def dispatch_batch(self, batch, device):
         ids = batch["ids"]
@@ -27,6 +36,13 @@ class VTCHandle(BaseHandle):
         text = batch["text"]
 
         return ids, video, video_length, text
+
+    def on_train_epoch_end(self, module):
+        """
+        clean the queue after each epoch
+        """
+        self.visual_queue.reset()
+        self.text_queue.reset()
 
     @staticmethod
     def generate_padding_attention_mask(
@@ -120,7 +136,7 @@ class VTCHandle(BaseHandle):
 
         # NOTE: add visual cls token to the model
         visual_embeddings = torch.cat(
-            (module.video_cls_token.expand(B, T, -1), visual_embeddings), dim=1
+            (module.video_cls_token.expand(B, -1, -1), visual_embeddings), dim=1
         )
         v_length = v_length + 1
 
@@ -145,6 +161,10 @@ class VTCHandle(BaseHandle):
         text_out_features, visual_out_features, text_length = self._forward(
             module, video, video_length, text_ids, text_length
         )
+
+        # initialize the queue if not already done
+        if not self.queue_initialized:
+            self._initiate_queue(module.device, visual_out_features.dtype)
 
         # NOTE: get cached viual text pair from the queue
         total_visual_logits = torch.cat(

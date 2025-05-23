@@ -90,6 +90,8 @@ class SLTModel(LightningModule):
         if self.vtc_flag:
             self.handles["vtc"] = VTCHandle(
                 self.cfg.vtc_weight,
+                self.hidden_size,
+                self.cfg.vtc_queue_size,
             )
             self.vtc_weight = self.cfg.vtc_weight
 
@@ -116,9 +118,6 @@ class SLTModel(LightningModule):
         self.visual_encoder.eval()
 
     def _create_bert_shared_encoder(self):
-        self.hidden_size = self.shared_encoder.config.hidden_size
-        self.video_cls_token = torch.nn.Parameter(torch.randn(1, 1, self.hidden_size))
-
         self.shared_encoder = BertModel.from_pretrained(
             self.cfg.modules.bert_shared_encoder_id,
             device_map="cpu",
@@ -171,6 +170,10 @@ class SLTModel(LightningModule):
             paras
         ) in self.shared_encoder.embeddings.word_embeddings.new_embeddings.parameters():
             paras.requires_grad = True
+
+        # NOTE: create cls embedding of visual encoder
+        self.hidden_size = self.shared_encoder.config.hidden_size
+        self.video_cls_token = torch.nn.Parameter(torch.randn(1, 1, self.hidden_size))
 
     def training_step(self, batch, batch_idx):
         losses = OrderedDict()

@@ -17,7 +17,7 @@ engine:
 
 devices: [0]
 
-vtg_flag: True
+vtg_flag: False
 vtg_weight: 1.0
 vtg_js_weight: 1.0
 
@@ -25,8 +25,9 @@ vtm_flag: False
 vtm_mask_ratio: 0.40
 vtm_weight: 1.0
 
-vtc_flag: False
+vtc_flag: True
 vtc_weight: 1.0
+vtc_queue_size: 1024
 
 prompt_learning: False
 
