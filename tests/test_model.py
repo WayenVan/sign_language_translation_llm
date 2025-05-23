@@ -38,16 +38,17 @@ def test_slt_model():
     for i, batch in enumerate(loader):
         model.training_step(batch, 0)
         model.validation_step(batch, 0)
+        print("ok")
 
 
 def test_slt_model_generation():
     initialize(config_path="../configs")
-    cfg = compose("initial_train")
+    cfg = compose("initial_train_home")
     cfg.data.batch_size = 2
     data_module = Ph14TDataModule(cfg)
     data_module.setup()
     model = SLTModel.load_from_checkpoint(
-        "outputs/train/2025-05-20_23-18-04/last.ckpt",
+        "/root/shared-data/sign_language_translation_llm/outputs/epoch=epoch=25-wer=val_generate_accu=0.54.ckpt",
         strict=False,
         cfg=cfg,
     )

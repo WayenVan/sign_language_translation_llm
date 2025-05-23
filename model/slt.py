@@ -70,29 +70,15 @@ class SLTModel(LightningModule):
         self.handles = nn.ModuleDict()
 
         if self.vtg_flag:
-            self.handles["vtg"] = VTGHandle(
-                self.vocab_size,
-                self.cfg.vtg_weight,
-                self.tokenizer,
-                self.cfg.vtg_mask_ratio,
-            )
+            self.handles["vtg"] = VTGHandle(self.vocab_size, self.tokenizer, self.cfg)
             self.vtg_weight = self.cfg.vtg_weight
 
         if self.vtm_flag:
-            self.handles["vtm"] = VTMHandle(
-                self.tokenizer,
-                self.vocab_size,
-                self.cfg.vtm_weight,
-                self.cfg.vtm_mask_ratio,
-            )
+            self.handles["vtm"] = VTMHandle(self.tokenizer, self.vocab_size, self.cfg)
             self.vtm_weight = self.cfg.vtm_weight
 
         if self.vtc_flag:
-            self.handles["vtc"] = VTCHandle(
-                self.cfg.vtc_weight,
-                self.hidden_size,
-                self.cfg.vtc_queue_size,
-            )
+            self.handles["vtc"] = VTCHandle(self.hidden_size, self.cfg)
             self.vtc_weight = self.cfg.vtc_weight
 
         if self.pl_flag and (self.vtm_flag or self.vtg_flag or self.vtc_flag):
@@ -295,6 +281,7 @@ class SLTModel(LightningModule):
                     (attn_mask, unfinished.unsqueeze(-1).long()), dim=1
                 )
 
+            # [B L]
             return (
                 torch.cat(output, dim=1)
                 if len(output) > 0

@@ -4,8 +4,24 @@ from tqdm import tqdm
 sys.path.append(".")
 from data.ph14t.ph14t_torch_dataset import Ph14TDataset
 from data.ph14t.ph14t_lightning_datamodule import Ph14TDataModule
+from data.ph14t.ph14t_index import Ph14TIndex
 from hydra import compose, initialize
 from hydra.utils import instantiate
+from transformers import AutoTokenizer
+
+
+def test_max_data_length():
+    tokenizer = AutoTokenizer.from_pretrained("dbmdz/bert-base-german-europeana-cased")
+    data_root = "/root/shared-data/sign_language_translation_llm/dataset/PHOENIX-2014-T-release-v3/"
+    ph14t_index = Ph14TIndex(data_root, mode="dev")
+    max_length = 0
+    for id in ph14t_index.ids:
+        data_info = ph14t_index.get_data_info_by_id(id)
+        text = data_info["translation"]
+        lentgh = len(tokenizer.tokenize(text))
+        if lentgh > max_length:
+            max_length = lentgh
+    print(max_length)
 
 
 def test_dataset():
@@ -62,4 +78,5 @@ def test_data_validation():
 if __name__ == "__main__":
     # test_dataset()
     # test_datamodule()
-    test_data_validation()
+    # test_data_validation()
+    test_max_data_length()

@@ -12,9 +12,9 @@ class VTMHandle(BaseHandle):
     Handles the model hooks for the VTM task.
     """
 
-    def __init__(self, tokenizer, vocab_size, loss_weight, mask_ratio=0.15):
+    def __init__(self, tokenizer, vocab_size, cfg):
         super().__init__()
-        self.mask_ratio = mask_ratio
+        self.mask_ratio = cfg.vtm_mask_ratio
 
         self.train_accu = Accuracy(
             task="multiclass", num_classes=vocab_size, ignore_index=-100
@@ -22,9 +22,13 @@ class VTMHandle(BaseHandle):
         self.val_accu = Accuracy(
             task="multiclass", num_classes=vocab_size, ignore_index=-100
         )
-        self.loss_weight = loss_weight
+        self.loss_weight = cfg.vtm_weight
         self.collator = DataCollatorForWholeWordMask(
-            tokenizer=tokenizer, mlm=True, mlm_probability=mask_ratio
+            tokenizer=tokenizer,
+            mlm=True,
+            mlm_probability=self.mask_ratio,
+            random_replace_prob=cfg.vtm_random_replace_prob,
+            mask_replace_prob=cfg.vtm_mask_replace_prob,
         )
 
     def dispatch_batch(self, batch, device):

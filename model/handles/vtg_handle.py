@@ -4,7 +4,7 @@ from .base_handle import BaseHandle
 from torch.nn import functional as F
 from typing import List
 from einops import rearrange
-from torchmetrics import Accuracy
+from torchmetrics import Accuracy, BLEUScore
 from transformers import DataCollatorForWholeWordMask
 
 
@@ -16,14 +16,14 @@ class VTGHandle(BaseHandle):
     def __init__(
         self,
         vocab_size,
-        loss_weight,
         tokenizer,
-        mask_ratio,
+        cfg,
     ):
         super().__init__()
-        self.loss_weight = loss_weight
+
+        self.loss_weight = cfg.vtg_weight
         self.vocab_size = vocab_size
-        self.mask_ratio = mask_ratio
+        self.mask_ratio = cfg.vtg_mask_ratio
 
         self.train_accu = Accuracy(
             task="multiclass",
@@ -31,13 +31,13 @@ class VTGHandle(BaseHandle):
             ignore_index=0,  # padding index
         )
 
-        self.val_accu = Accuracy(
-            task="multiclass",
-            num_classes=self.vocab_size,
-            ignore_index=0,  # paddding index
-        )
+        self.bleu = BLEUScore(n_gram=1, smooth=True)
         self.collator = DataCollatorForWholeWordMask(
-            tokenizer=tokenizer, mlm=True, mlm_probability=mask_ratio
+            tokenizer=tokenizer,
+            mlm=True,
+            mlm_probability=self.mask_ratio,
+            mask_replace_prob=cfg.vtg_random_replace_prob,
+            random_replace_prob=cfg.vtg_mask_replace_prob,
         )
 
     def dispatch_batch(self, batch, device):
@@ -60,9 +60,9 @@ class VTGHandle(BaseHandle):
         """
         Called at the end of the validation epoch.
         """
-        val_acc = self.val_accu.compute()
-        module.log("val_generate_accu", val_acc, prog_bar=True, sync_dist=True)
-        self.val_accu.reset()
+        bleu = self.bleu.compute()
+        module.log("val_generate_bleu", bleu, prog_bar=True, sync_dist=True)
+        self.bleu.reset()
 
     def tokenize(self, text: List[str], tokenizer, device, use_mask=True):
         """
@@ -247,13 +247,22 @@ class VTGHandle(BaseHandle):
     def validation_step(self, module: lightning, batch, batch_idx):
         ids, video, video_length, text = self.dispatch_batch(batch, module.device)
 
-        text_ids, labels, text_length = self.tokenize(
-            text, module.tokenizer, module.device, use_mask=False
-        )
+        B = len(ids)
 
-        out_logit, _ = self._forward(module, video, video_length, text_ids, text_length)
+        with torch.no_grad():
+            # NOTE: max length in dev set is 50
+            generated = module.generate(video, video_length, max_length=50)
+            generated = generated.cpu().tolist()
 
-        self.val_accu.update(
-            rearrange(out_logit, "b l c -> (b l) c"),
-            rearrange(labels, "b l -> (b l)"),
-        )
+        for b in range(B):
+            indexs = generated[b]
+            try:
+                eos_index = indexs.index(module.tokenizer.eos_token_id)
+            except ValueError:
+                eos_index = len(indexs)
+            indexs = indexs[:eos_index]
+            predicted = module.tokenizer.decode(indexs, skip_special_tokens=True)
+            self.bleu.update(
+                [predicted],
+                [[text[b]]],
+            )

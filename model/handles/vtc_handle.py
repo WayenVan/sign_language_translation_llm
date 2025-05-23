@@ -13,10 +13,10 @@ class VTCHandle(BaseHandle):
     Handles the model hooks for the VTM task.
     """
 
-    def __init__(self, loss_weight, hiddent_size, queue_max_size):
+    def __init__(self, hiddent_size, cfg):
         super().__init__()
-        self.loss_weight = loss_weight
-        self.queue_max_size = queue_max_size
+        self.loss_weight = cfg.vtc_weight
+        self.queue_max_size = cfg.vtc_queue_max_size
         self.hiddent_size = hiddent_size
         self.queue_initialized = False
 
