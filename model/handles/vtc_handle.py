@@ -187,9 +187,18 @@ class VTCHandle(BaseHandle):
 
         module.log("train_contrastive_loss", loss, prog_bar=True)
 
-        # NOTE: put the pairs into the queue
-        self.visual_queue.enqueue(visual_out_features.detach())
-        self.text_queue.enqueue(text_out_features.detach())
+        with torch.no_grad():
+            # NOTE: all gather all other features
+            gather_visual_feature = module.all_gather(visual_out_features)
+            gather_text_feature = module.all_gather(text_out_features)
+
+            # NOTE: put the pairs into the queue
+            self.visual_queue.enqueue(
+                torch.cat(gather_visual_feature, dim=0).detach().contiguous()
+            )
+            self.text_queue.enqueue(
+                torch.cat(gather_text_feature, dim=0).detach().contiguous()
+            )
 
         return loss
 
