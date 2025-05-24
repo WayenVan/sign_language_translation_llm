@@ -53,7 +53,7 @@ def test_data_validation():
     import cv2
 
     initialize(config_path="../configs")
-    cfg = compose("initial_train")
+    cfg = compose("initial_train_home")
 
     del cfg.data.transforms.train.transforms[-2]
     del cfg.data.transforms.val.transforms[-2]
@@ -70,7 +70,7 @@ def test_data_validation():
     for i in range(video.shape[0]):
         f = cv2.cvtColor(video[i], cv2.COLOR_RGB2BGR)
         cv2.imwrite(
-            f"/root/projects/slt_set_llms/outputs/visualization_val/{i}.jpg",
+            f"outputs/visualization_val/{i}.jpg",
             f.astype("uint8"),
         )
 
@@ -78,5 +78,5 @@ def test_data_validation():
 if __name__ == "__main__":
     # test_dataset()
     # test_datamodule()
-    # test_data_validation()
-    test_max_data_length()
+    test_data_validation()
+    # test_max_data_length()

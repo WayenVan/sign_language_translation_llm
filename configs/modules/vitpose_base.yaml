@@ -1,0 +1,20 @@
+visual_encoder:
+  _target_: modules.VitPoseVisualEncoder
+  id: usyd-community/vitpose-plus-base
+  hidden_states_layer: -2
+
+visual_adapter:
+  _target_: modules.VisualAdapter
+  hidden_size: 768
+  target_hidden_size: 768
+  num_heads: 8
+  num_layers: 4
+  num_extra_queries: 4
+
+bert_shared_encoder_id: dbmdz/bert-base-german-europeana-cased
+
+connector:
+  _target_: modules.LinearConnector
+  in_features: 768
+  out_features: 1152 #gemma3 1b
+  # out_features: 2560 #gemma3 1b

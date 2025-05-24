@@ -209,16 +209,27 @@ class VTCHandle(BaseHandle):
             module, video, video_length, text_ids, text_length
         )
 
+        # initialize the queue if not already done
+        if not self.queue_initialized:
+            self._initiate_queue(module.device, visual_out_features.dtype)
+
         with torch.no_grad():
+            # NOTE: get cached viual text pair from the queue
+            total_visual_logits = torch.cat(
+                [visual_out_features, self.visual_queue.get_queue()], dim=0
+            )
+            total_text_logits = torch.cat(
+                [text_out_features, self.text_queue.get_queue()], dim=0
+            )
+
             # WARN: in case all labels are -100, the loss will be 0, impossible situation
             # because the mask_token will reproduce if no token is masked
             loss = (
                 clip_loss(
-                    visual_out_features,
-                    text_out_features,
+                    total_visual_logits,
+                    total_text_logits,
                     module.contrastive_logit_scale,
                 )
                 * self.loss_weight
             )
-
-        module.log("val_contrastive_loss", loss, prog_bar=True)
+            module.log("val_contrastive_loss", loss, prog_bar=True)

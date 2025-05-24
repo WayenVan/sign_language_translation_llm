@@ -17,7 +17,7 @@ from transformers import (
 # device = "cuda" if torch.cuda.is_available() else "cpu"
 device = "cpu"
 
-image = Image.open("outputs/visualization/0.jpg")
+image = Image.open("outputs/visualization_val/0.jpg")
 image = image.resize((192, 256))
 image = image.convert("RGB")
 image = np.array(image, dtype=np.float32) / 255.0
@@ -26,9 +26,9 @@ inputs = F.normalize(image, [0.485, 0.456, 0.406], [0.229, 0.224, 0.225], inplac
 inputs = inputs.unsqueeze(0)  # Add batch dimension
 
 
-image_processor = AutoProcessor.from_pretrained("usyd-community/vitpose-plus-small")
+image_processor = AutoProcessor.from_pretrained("usyd-community/vitpose-plus-base")
 model = VitPoseForPoseEstimation.from_pretrained(
-    "usyd-community/vitpose-plus-small", device_map=device
+    "usyd-community/vitpose-plus-base", device_map=device
 )
 
 
@@ -45,4 +45,4 @@ for i in range(17):
     heatmap = outputs.heatmaps[0, i].cpu().numpy()
 
     plt.imshow(heatmap)
-    plt.savefig("outputs/visualization/heatmap_{}.jpg".format(i))
+    plt.savefig("outputs/viz_pose/{}.jpg".format(i))
