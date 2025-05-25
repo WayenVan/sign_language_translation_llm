@@ -172,7 +172,9 @@ class VTGHandle(BaseHandle):
 
             hidden_state = visual_encoder_outputs.hidden_state
             v_length = visual_encoder_outputs.video_length
-            visual_embeddings = module.visual_adapter(hidden_state)  # b t c
+            visual_embeddings, v_length = module.visual_adapter(
+                hidden_state, v_length
+            )  # b t c
             B, T, C = visual_embeddings.shape
         else:
             v_length = video_length

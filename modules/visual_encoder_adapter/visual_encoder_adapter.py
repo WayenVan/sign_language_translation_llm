@@ -9,6 +9,7 @@ from timm.models.vision_transformer import (
     Mlp,
     LayerScale,
 )
+from .tconv import TemporalConv1D
 
 
 class VisualAdapter(nn.Module):
@@ -23,6 +24,7 @@ class VisualAdapter(nn.Module):
         proj_drop=0.0,
         attn_drop=0.0,
         drop_path=0.0,
+        max_token_length: Optional[int] = 512,
     ):
         super().__init__()
         self.num_extra_queries = num_extra_queries
@@ -45,9 +47,11 @@ class VisualAdapter(nn.Module):
                 for _ in range(num_layers)
             ]
         )
+        self.position_embedding = nn.Embedding(max_token_length, hidden_size)
         self.linear = nn.Linear(hidden_size, target_hidden_size)
+        self.aggregation = Aggregation(hidden_size)
 
-    def forward(self, x):
+    def forward(self, x, t_length):
         # x: (B, T, HW, C)
         B, T, HW, C = x.shape
         x = rearrange(x, "b t hw c -> (b t) hw c")
@@ -58,10 +62,42 @@ class VisualAdapter(nn.Module):
 
         extra_queries = rearrange(extra_queries, "(b t) n c -> b t n c", b=B, t=T)
 
-        feats = extra_queries.mean(dim=-2)  # (B T C)
+        # Add positional embeddings
+        position_ids = torch.arange(T, device=x.device)
+        position_embeddings = rearrange(
+            self.position_embedding(position_ids), "t c -> 1 t 1 c"
+        )
+        extra_queries = extra_queries + position_embeddings
+
+        # aggregate extra queries
+        extra_queries, t_length = self.aggregation(extra_queries, t_length)
+
+        # flatten
+        t_length = t_length * self.num_extra_queries
+        feats = rearrange(extra_queries, "b t n c -> b (t n) c")
         feats = self.linear(feats)
 
-        return feats
+        return feats, t_length
+
+
+class Aggregation(nn.Module):
+    def __init__(self, hidden_size):
+        super().__init__()
+        self.conv = TemporalConv1D(
+            input_size=hidden_size,
+            out_size=hidden_size,
+            bottleneck_size=hidden_size,
+            conv_type=["K3", "P2", "K3", "P2"],
+            dropout=0.0,
+        )
+
+    def forward(self, x, t_length):
+        # x: (B, T, N,  C)
+        B, T, N, C = x.shape
+        x = rearrange(x, "b t n c -> (b n) c t")
+        x, t_length = self.conv(x, t_length)
+        x = rearrange(x, "(b n) c t -> b t n c", b=B, n=N)
+        return x, t_length
 
 
 class Block(nn.Module):

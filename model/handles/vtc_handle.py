@@ -114,7 +114,9 @@ class VTCHandle(BaseHandle):
             visual_encoder_outputs = module.visual_encoder(video, video_length)
         hidden_state = visual_encoder_outputs.hidden_state
         v_length = visual_encoder_outputs.video_length
-        visual_embeddings = module.visual_adapter(hidden_state)  # b t c
+        visual_embeddings, v_length = module.visual_adapter(
+            hidden_state, v_length
+        )  # b t c
 
         with torch.no_grad():
             textaul_embeddings = module.shared_encoder.get_input_embeddings()(
