@@ -27,7 +27,7 @@ def test_slt_model():
     import polars as pl
 
     initialize(config_path="../configs")
-    cfg = compose("initial_train_home")
+    cfg = compose("initial_train")
     cfg.data.batch_size = 2
     data_module = Ph14TDataModule(cfg)
     data_module.setup()

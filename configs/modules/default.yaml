@@ -9,7 +9,7 @@ visual_adapter:
   target_hidden_size: 768
   num_heads: 6
   num_layers: 2
-  num_extra_queries: 4
+  num_extra_queries: 8
 
 bert_shared_encoder_id: dbmdz/bert-base-german-europeana-cased
 

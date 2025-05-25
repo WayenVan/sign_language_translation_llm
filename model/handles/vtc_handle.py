@@ -1,10 +1,7 @@
 import torch
 from .base_handle import BaseHandle
-from torch.nn import functional as F
-from torchmetrics import Accuracy
-from einops import rearrange, repeat
 from misc.clip_loss import clip_loss
-from typing import List, override
+from typing import List
 from misc.circular_queue import CircularQueue
 
 
@@ -39,10 +36,10 @@ class VTCHandle(BaseHandle):
 
     def on_train_epoch_end(self, module):
         """
-        clean the queue after each epoch
+        do not clean the queue
         """
-        self.visual_queue.reset()
-        self.text_queue.reset()
+        # self.visual_queue.reset()
+        # self.text_queue.reset()
 
     @staticmethod
     def generate_padding_attention_mask(
@@ -136,7 +133,8 @@ class VTCHandle(BaseHandle):
 
         # NOTE: add visual cls token to the model
         visual_embeddings = torch.cat(
-            (module.video_cls_token.expand(B, -1, -1), visual_embeddings), dim=1
+            (module.video_cls_token.expand(B, -1, -1).contiguous(), visual_embeddings),
+            dim=1,
         )
         v_length = v_length + 1
 
@@ -169,10 +167,10 @@ class VTCHandle(BaseHandle):
         # NOTE: get cached viual text pair from the queue
         total_visual_logits = torch.cat(
             [visual_out_features, self.visual_queue.get_queue()], dim=0
-        )
+        ).contiguous()
         total_text_logits = torch.cat(
             [text_out_features, self.text_queue.get_queue()], dim=0
-        )
+        ).contiguous()
 
         # WARN: in case all labels are -100, the loss will be 0, impossible situation
         # because the mask_token will reproduce if no token is masked

@@ -40,21 +40,6 @@ def train(cfg: DictConfig) -> None:
 
     logger.info(f"Output directory: {output_dir}")
 
-    # NOTE: define callbacks for trainer
-    cbs = [
-        callbacks.RichProgressBar(),
-        callbacks.LearningRateMonitor("step", log_momentum=True),
-        callbacks.ModelCheckpoint(
-            dirpath=output_dir,
-            filename="epoch={epoch:02d}-wer={val_generate_accu:.2f}",
-            monitor="val_generate_accu",
-            mode="max",
-            save_last=True,
-            save_weights_only=True,
-        ),
-        # DebugCallback(),
-    ]
-
     # NOTE: set the logger
     wdb_config = OmegaConf.to_container(cfg, resolve=True)
     wdb_config["output_dir"] = output_dir
@@ -63,6 +48,22 @@ def train(cfg: DictConfig) -> None:
         project="sign-langauge-translation-llm",
         config=wdb_config,
     )
+    run_id = str(lt_logger.experiment.id)
+
+    # NOTE: define callbacks for trainer
+    cbs = [
+        callbacks.RichProgressBar(),
+        callbacks.LearningRateMonitor("step", log_momentum=True),
+        callbacks.ModelCheckpoint(
+            dirpath=output_dir,
+            filename=run_id + "-{epoch:02d}-{val_generate_bleu:.4f}",
+            monitor="val_generate_bleu",
+            mode="max",
+            save_last=True,
+            save_weights_only=True,
+        ),
+        # DebugCallback(),
+    ]
 
     # NOTE: start training
     t = Trainer(

@@ -64,10 +64,12 @@ class CircularQueue:
     def get_queue(self) -> torch.Tensor:
         """获取当前队列的有效内容（按FIFO顺序排列）"""
         if self.current_size < self.max_size:
-            return self.queue[: self.current_size]
+            return self.queue[: self.current_size].contiguous()
         else:
             # 如果队列已满，按写入顺序排列（旧数据在前）
-            return torch.cat([self.queue[self.ptr :], self.queue[: self.ptr]], dim=0)
+            return torch.cat(
+                [self.queue[self.ptr :], self.queue[: self.ptr]], dim=0
+            ).contiguous()
 
     def __len__(self) -> int:
         """返回当前队列中实际存储的样本数"""

@@ -23,8 +23,8 @@ def clip_loss(
     text_features = F.normalize(text_features, dim=1)
 
     # Similarity logits
-    logits_per_image = image_features @ text_features.T  # [B, B]
-    logits_per_text = logits_per_image.T  # [B, B]
+    logits_per_image = (image_features @ text_features.T).contiguous()  # [B, B]
+    logits_per_text = logits_per_image.T.contiguous()  # [B, B]
 
     # Default logit scale if not provided
     if logit_scale is None:
@@ -46,4 +46,3 @@ def clip_loss(
     loss_t2i = F.cross_entropy(logits_per_text, ground_truth)
 
     return (loss_i2t + loss_t2i) / 2
-

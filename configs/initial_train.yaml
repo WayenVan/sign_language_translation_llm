@@ -1,9 +1,10 @@
 defaults:
   - base_train
+  # - override modules: vitpose_base
   - _self_
 
 debug: False
-max_epochs: 100
+max_epochs: 400
 
 engine:
   lr_scheduler:
@@ -13,15 +14,19 @@ engine:
 
 vtg_flag: True
 vtg_weight: 1.0
-vtg_mask_ratio: 0.40
+vtg_mask_ratio: 0.8
+vtg_random_replace_prob: 0.5
+vtg_mask_replace_prob: 0.5
 
-vtm_flag: True
-vtm_mask_ratio: 0.8
+vtm_flag: False
+vtm_mask_ratio: 0.40
 vtm_weight: 1.0
+vtm_random_replace_prob: 0.1
+vtm_mask_replace_prob: 0.8
 
-vtc_flag: False
+vtc_flag: True
 vtc_weight: 1.0
+vtc_queue_max_size: 4096
 
 prompt_learning: False
-
 inference_mode: False
