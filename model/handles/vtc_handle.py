@@ -1,3 +1,4 @@
+from einops import rearrange
 import torch
 from .base_handle import BaseHandle
 from misc.clip_loss import clip_loss
@@ -194,10 +195,12 @@ class VTCHandle(BaseHandle):
 
             # NOTE: put the pairs into the queue
             self.visual_queue.enqueue(
-                torch.cat(gather_visual_feature, dim=0).detach().contiguous()
+                rearrange(gather_visual_feature, "w b c -> (w b) c")
+                .detach()
+                .contiguous()
             )
             self.text_queue.enqueue(
-                torch.cat(gather_text_feature, dim=0).detach().contiguous()
+                rearrange(gather_text_feature, "w b c -> (w b) c").detach().contiguous()
             )
 
         return loss

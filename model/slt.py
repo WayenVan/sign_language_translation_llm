@@ -226,21 +226,23 @@ class SLTModel(LightningModule):
         B, T, C, H, W = video.shape
         device = video.device
 
-        # Create video mask
-        video_mask = torch.arange(T, device=device).expand(
-            B, T
-        ) < video_length.unsqueeze(1)
-        video_mask = video_mask.long()
-
         with torch.no_grad():
             # Process visual inputs
             visual_outputs = self.visual_encoder(video, video_length)
-            visual_embeddings = self.visual_adapter(visual_outputs.hidden_state)
+            visual_embeddings, video_length = self.visual_adapter(
+                visual_outputs.hidden_state, video_length
+            )
 
             # Prepare initial inputs with CLS token
             bos_embeddings = self.shared_encoder.get_input_embeddings()(
                 torch.full((B, 1), self.tokenizer.bos_token_id, device=device)
             )
+
+            # Create video mask
+            video_mask = torch.arange(T, device=device).expand(
+                B, T
+            ) < video_length.unsqueeze(1)
+            video_mask = video_mask.long()
             inputs = torch.cat((visual_embeddings, bos_embeddings), dim=1)
             attn_mask = torch.cat(
                 (video_mask, torch.ones((B, 1), device=device)), dim=1
