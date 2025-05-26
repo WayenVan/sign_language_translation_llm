@@ -10,9 +10,15 @@ from einops import rearrange
 from collections import OrderedDict
 import numpy as np
 
-from transformers.models.bert.modeling_bert import BertModel, BertConfig
 from transformers.models.gemma3 import Gemma3ForCausalLM, Gemma3ForConditionalGeneration
 from modules.extended_embeddings import CustomEmbeddingLayer
+from modules.q_former.q_former import (
+    BertLMHeadModel,
+    BertModel,
+    BertConfig,
+    BertOnlyMLMHead,
+)
+from transformers.models.bert import BertLMHeadModel as BertLMHeadModelFromHF
 
 from .handles.vtg_handle import VTGHandle
 from .handles.vtm_handle import VTMHandle
@@ -40,7 +46,7 @@ class SLTModel(LightningModule):
         self.contrastive_logit_scale = nn.Parameter(torch.ones([]) * np.log(1 / 0.07))
 
         self._create_llm()
-        self._create_layers()
+        self._create_visual_layers()
         self._create_bert_shared_encoder()
         self._create_handles()
 
@@ -94,7 +100,7 @@ class SLTModel(LightningModule):
                 self.llm_tokenizer.pad_token_type_id,
             )
 
-    def _create_layers(self):
+    def _create_visual_layers(self):
         self.visual_encoder = instantiate(self.cfg.modules.visual_encoder)
         self.visual_adapter = instantiate(self.cfg.modules.visual_adapter)
 
@@ -103,18 +109,34 @@ class SLTModel(LightningModule):
             paras.requires_grad = False
         self.visual_encoder.eval()
 
-    def _create_bert_shared_encoder(self):
-        self.shared_encoder = BertModel.from_pretrained(
+    def _create_bert_shared_encoder(self, cross_attention_freq=2):
+        self.num_query_token = self.cfg.modules.num_query_token
+
+        # setup q former configs
+        self.bert_config = BertConfig.from_pretrained(
             self.cfg.modules.bert_shared_encoder_id,
+        )
+        self.hidden_size = self.bert_config.hidden_size
+
+        self.bert_config.cross_attention_freq = cross_attention_freq
+        self.bert_config.add_cross_attention = True
+        self.bert_config.query_length = self.num_query_token
+        self.bert_config.encoder_width = self.hidden_size
+
+        self.shared_encoder = BertLMHeadModel(self.bert_config)
+        params = BertLMHeadModelFromHF.from_pretrained(
+            "dbmdz/bert-base-german-europeana-cased",
             device_map="cpu",
             torch_dtype=torch.float32,
-        )
-        # NOTE: add bos and eos token
+        ).state_dict()
+        self.shared_encoder.load_state_dict(params, strict=False)
+
         self.tokenizer = AutoTokenizer.from_pretrained(
             self.cfg.modules.bert_shared_encoder_id,
             use_fast=True,
         )
 
+        # NOTE: add bos and eos token
         old_vocab_size = self.tokenizer.vocab_size
         self.tokenizer.padding_side = "right"
         self.tokenizer.add_special_tokens(
@@ -127,45 +149,66 @@ class SLTModel(LightningModule):
         new_vocab_size = len(self.tokenizer)
         pretrained_weights = self.shared_encoder.get_input_embeddings().weight
         padding_idx = self.tokenizer.pad_token_id
+
         # NOTE: createa a new embeeding layer for bert
-        self.shared_encoder.embeddings.word_embeddings = CustomEmbeddingLayer(
+        self.shared_encoder.bert.embeddings.word_embeddings = CustomEmbeddingLayer(
             old_vocab_size,
             2,
-            self.shared_encoder.config.hidden_size,
+            self.hidden_size,
             padding_idx,
             pretrained_weights,
         )
 
-        self.bert_config = AutoConfig.from_pretrained(
-            self.cfg.modules.bert_shared_encoder_id,
-        )
-
+        # update vocab size
         self.vocab_size = new_vocab_size
         assert self.vocab_size == self.bert_config.vocab_size + 2, (
             f"Vocab size {self.vocab_size} does not match bert config vocab size {self.bert_config.vocab_size}"
         )
-        self.shared_encoder_header = nn.Linear(
-            self.bert_config.hidden_size,
-            self.vocab_size,  # WARN: be careful with the vocab size and len(tokenizer)
-        )
+        # updatre config and create new output layer
+        self.bert_config.vocab_size = self.shared_encoder.config.vocab_size + 2
+        self.shared_encoder.cls = BertOnlyMLMHead(config=self.bert_config)
 
         # NOTE: freeze all the embedding model in the layer, but not the new one
-        for paras in self.shared_encoder.embeddings.parameters():
+        for paras in self.shared_encoder.bert.embeddings.parameters():
             paras.requires_grad = False
-        for (
-            paras
-        ) in self.shared_encoder.embeddings.word_embeddings.new_embeddings.parameters():
+        for paras in self.shared_encoder.bert.embeddings.word_embeddings.new_embeddings.parameters():
             paras.requires_grad = True
 
-        # NOTE: create cls embedding of visual encoder
-        self.hidden_size = self.shared_encoder.config.hidden_size
-        self.video_cls_token = torch.nn.Parameter(torch.randn(1, 1, self.hidden_size))
+        # NOTE: create visual embedding for visual encoder
+        self.video_query_tokens = nn.Parameter(
+            torch.zeros(
+                (1, self.num_query_token, self.hidden_size),
+                dtype=torch.float32,
+            ),
+            requires_grad=True,
+        )
+        self.video_query_tokens.data.normal_(
+            mean=0.0, std=self.shared_encoder.config.initializer_range
+        )
+
+    def forward_visual(self, video, video_length):
+        """
+        Forward pass for visual features.
+        :param video: (batch_size, seq_len, 3, h, w)
+        :param video_length: (batch_size,)
+        :return: visual embeddings
+        """
+        visual_outputs = self.visual_encoder(video, video_length)
+        v_length = visual_outputs.video_length
+        visual_embeddings = self.visual_adapter(visual_outputs.hidden_state)
+        return visual_embeddings, v_length
 
     def training_step(self, batch, batch_idx):
+        # forward visual features to avoid duplicated memory computation
+        video = batch["video"].to(self.device)
+        video_length = batch["video_length"].to(self.device)
+        visual_embeddings, v_length = self.forward_visual(video, video_length)
+
         losses = OrderedDict()
         for name, handle in self.handles.items():
-            losses[name] = handle.train_step(self, batch, batch_idx)
-
+            losses[name] = handle.train_step(
+                self, batch, batch_idx, visual_embeddings, v_length
+            )
         loss = 0
         for name, l in losses.items():
             loss += l
@@ -174,8 +217,13 @@ class SLTModel(LightningModule):
         return loss
 
     def validation_step(self, batch, batch_idx):
+        # forward visual features to avoid duplicated memory computation
+        video = batch["video"].to(self.device)
+        video_length = batch["video_length"].to(self.device)
+        visual_embeddings, v_length = self.forward_visual(video, video_length)
+
         for name, handle in self.handles.items():
-            handle.validation_step(self, batch, batch_idx)
+            handle.validation_step(self, batch, batch_idx, visual_embeddings, v_length)
 
     def on_train_epoch_end(self):
         for name, handle in self.handles.items():
@@ -214,69 +262,95 @@ class SLTModel(LightningModule):
                 del checkpoint[name]
         return checkpoint
 
+    @staticmethod
+    def length_to_mask(lengths, max_length=None):
+        """
+        Convert lengths to a boolean mask.
+        lengths: [B]
+        max_length: int, optional
+        """
+        if max_length is None:
+            max_length = lengths.max().item()
+        B = lengths.size(0)
+        mask = torch.arange(max_length, device=lengths.device).expand(
+            B, max_length
+        ) < lengths.unsqueeze(1)
+        return mask.long()  # (B, max_length)
+
+    @torch.no_grad()
     def generate(
         self,
-        video: torch.Tensor,
-        video_length: torch.Tensor,
+        video: torch.Tensor = None,
+        video_length: torch.Tensor = None,
+        video_embeddings: Optional[torch.Tensor] = None,
         max_length: Optional[int] = 30,
     ):
         """
         @param video: (batch_size, seq_len, 3, h, w)
         """
-        B, T, C, H, W = video.shape
-        device = video.device
+        if video is None and video_embeddings is None:
+            raise ValueError("Either video or video_embeddings must be provided.")
+
+        if video is not None and video_embeddings is not None:
+            raise ValueError(
+                "Only one of video or video_embeddings should be provided."
+            )
+
+        if video is not None:
+            B, T, _, _, _ = video.shape
+            device = video.device
+            video_embeddings, video_length = self.forward_visual(video, video_length)
+        else:
+            B, T, _ = video_embeddings.shape
+            device = video_embeddings.device
 
         # Create video mask
-        video_mask = torch.arange(T, device=device).expand(
-            B, T
-        ) < video_length.unsqueeze(1)
-        video_mask = video_mask.long()
+        video_attention_mask = self.length_to_mask(
+            video_length, max_length=video_embeddings.shape[1]
+        )
+        # video query
+        video_query_tokens = self.video_query_tokens.expand(B, -1, -1)
 
         with torch.no_grad():
-            # Process visual inputs
-            visual_outputs = self.visual_encoder(video, video_length)
-            visual_embeddings = self.visual_adapter(visual_outputs.hidden_state)
-
-            # Prepare initial inputs with CLS token
-            bos_embeddings = self.shared_encoder.get_input_embeddings()(
-                torch.full((B, 1), self.tokenizer.bos_token_id, device=device)
-            )
-            inputs = torch.cat((visual_embeddings, bos_embeddings), dim=1)
-            attn_mask = torch.cat(
-                (video_mask, torch.ones((B, 1), device=device)), dim=1
+            # attention mask for the shared encoder
+            attn_mask = torch.ones(
+                B, self.num_query_token + 1, device=device, dtype=torch.long
             )
 
             # Initialize generation state
             output = []
             unfinished = torch.ones(B, dtype=torch.bool, device=device)
-
+            input = torch.full(
+                (B, 1), self.tokenizer.bos_token_id, device=device, dtype=torch.long
+            )
             for _ in range(max_length):
                 if not unfinished.any():
                     break
 
                 # Forward pass
-                out_features = self.shared_encoder(
-                    inputs_embeds=inputs,
+                logits = self.shared_encoder(
+                    input_ids=input,
+                    query_embeds=video_query_tokens,
                     attention_mask=attn_mask,
-                )
+                    encoder_hidden_states=video_embeddings,
+                    encoder_attention_mask=video_attention_mask,
+                ).logits  # [B, L, C]
+                logits = logits[:, -1, :]  # Get logits for the last token
+                # [B, C]
 
-                # Get next token predictions
-                logits = self.shared_encoder_header(
-                    out_features.last_hidden_state[:, -1:]
-                )
                 next_tokens = torch.argmax(logits, dim=-1)  # Greedy decoding
+                # [B ]
 
                 # Update unfinished sequences
                 unfinished = unfinished & (
                     next_tokens.squeeze() != self.tokenizer.eos_token_id
                 )
-                output.append(next_tokens)
+
+                # update output
+                output.append(next_tokens.unsqueeze(-1))  # [B, 1]
 
                 # Prepare next inputs
-                inputs = torch.cat(
-                    (inputs, self.shared_encoder.get_input_embeddings()(next_tokens)),
-                    dim=1,
-                )
+                input = torch.cat((input, next_tokens.unsqueeze(-1)), dim=1)
                 attn_mask = torch.cat(
                     (attn_mask, unfinished.unsqueeze(-1).long()), dim=1
                 )

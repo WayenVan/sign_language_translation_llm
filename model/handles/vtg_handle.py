@@ -3,7 +3,7 @@ import torch
 from .base_handle import BaseHandle
 from torch.nn import functional as F
 from typing import List
-from einops import rearrange
+from einops import rearrange, repeat
 from torchmetrics import Accuracy, BLEUScore
 from transformers import DataCollatorForWholeWordMask
 
@@ -102,128 +102,106 @@ class VTGHandle(BaseHandle):
         return (
             torch.LongTensor(input_outputs["input_ids"]).to(device),
             torch.LongTensor(label_outputs["input_ids"]).to(device),
-            torch.LongTensor(input_outputs["attention_mask"])
-            .sum(dim=1)
-            .to(device),  # (B), text length
+            torch.LongTensor(input_outputs["attention_mask"]).to(
+                device
+            ),  # (B), text length
         )
 
     @staticmethod
     def generate_padding_casual_attention_mask(
-        video_length,
-        text_length,
-        max_video_length=None,
-        max_text_length=None,
-        with_video=True,
+        num_video_queries,
+        text_attention_mask,  # [B, L]
     ):
         """
         Generate addtivie attention mask for the video and text sequences.
         video_length: [B]
         text_length: [B]
         """
-        if max_video_length is None:
-            max_video_length = video_length.max().item()
-        if max_text_length is None:
-            max_text_length = text_length.max().item()
+        B, L = text_attention_mask.shape
+        device = text_attention_mask.device
 
-        video_mask = torch.arange(max_video_length, device=video_length.device).expand(
-            video_length.size(0), max_video_length
-        ) < video_length.unsqueeze(1)
-        text_mask = torch.arange(max_text_length, device=text_length.device).expand(
-            text_length.size(0), max_text_length
-        ) < text_length.unsqueeze(1)
-
-        video_mask = video_mask.long()
-        text_mask = text_mask.long()
-
-        if with_video:
-            padding_mask = torch.cat((video_mask, text_mask), dim=1).unsqueeze(
-                1
-            )  # for heads dimension and query dimension # (B,  1, L)
-        else:
-            padding_mask = text_mask.unsqueeze(1)
+        text_mask = F.pad(text_attention_mask, (num_video_queries, 0), value=1)
+        text_mask = text_mask.unsqueeze(1)  # (B, 1, L + num_video_queries)
 
         # Generate causal mask
         text_casual_mask = torch.triu(
-            torch.ones((max_text_length, max_text_length)),
+            torch.ones((L, L)),
             diagonal=1,
-        ).to(video_mask.device)
+        ).to(device)
         text_casual_mask = torch.where(text_casual_mask == 1, 0, 1)
-        if with_video:
-            casual_mask = F.pad(text_casual_mask, (0, 0, max_video_length, 0), value=0)
-            casual_mask = F.pad(casual_mask, (max_video_length, 0, 0, 0), value=1)
-        else:
-            casual_mask = text_casual_mask
+        casual_mask = F.pad(text_casual_mask, (0, 0, num_video_queries, 0), value=0)
+        casual_mask = F.pad(casual_mask, (num_video_queries, 0, 0, 0), value=1)
 
-        return padding_mask * casual_mask
+        return (
+            text_mask * casual_mask
+        )  # (B, L + num_video_queries, L + num_video_queries)
+
+    @staticmethod
+    def length_to_mask(lengths, max_length=None):
+        """
+        Convert lengths to a boolean mask.
+        lengths: [B]
+        max_length: int, optional
+        """
+        if max_length is None:
+            max_length = lengths.max().item()
+        B = lengths.size(0)
+        mask = torch.arange(max_length, device=lengths.device).expand(
+            B, max_length
+        ) < lengths.unsqueeze(1)
+        return mask.long()  # (B, max_length)
 
     def _forward(
         self,
         module,
-        video,
-        video_length,
-        text_ids,
-        text_length,
-        with_video=True,
+        visual_features,  # [b t c]
+        v_length,  # [b]
+        text_ids,  # [B, L]
+        text_attention_mask,  # [b l]
         output_attentions=False,
     ):
-        if with_video:
-            with torch.no_grad():
-                visual_encoder_outputs = module.visual_encoder(video, video_length)
+        B, T, C = visual_features.shape
+        B, L = text_ids.shape
 
-            hidden_state = visual_encoder_outputs.hidden_state
-            v_length = visual_encoder_outputs.video_length
-            visual_embeddings = module.visual_adapter(hidden_state)  # b t c
-            B, T, C = visual_embeddings.shape
-        else:
-            v_length = video_length
-
-        textaul_embeddings = module.shared_encoder.get_input_embeddings()(
-            text_ids
-        )  # b l c
-
-        _, L, _ = textaul_embeddings.shape
-
-        if with_video:
-            assert T == v_length.max().item(), (
-                f"Visual length {T} does not match max video length {v_length.max().item()}"
-            )
-        assert L == text_length.max().item(), (
-            f"Text length {L} does not match max text length {text_length.max().item()}"
-        )
-
-        # 5. 生成注意力掩码
+        # create mask for shared encoder
         padding_attention_casual = self.generate_padding_casual_attention_mask(
-            v_length, text_length, with_video=with_video
+            module.num_query_token, text_attention_mask
         )
 
-        if with_video:
-            features = torch.cat(
-                (visual_embeddings, textaul_embeddings), dim=1
-            )  # b t+l c
-        else:
-            features = textaul_embeddings
+        # create padding mask for the cross atttention with video
+        cross_attention_mask = self.length_to_mask(v_length, max_length=T)
 
+        # video query
+        video_query_tokens = module.video_query_tokens.expand(B, -1, -1)
+
+        # q-former forward
         bert_output = module.shared_encoder(
-            inputs_embeds=features,
+            input_ids=text_ids,
+            query_embeds=video_query_tokens,
             attention_mask=padding_attention_casual,
+            encoder_hidden_states=visual_features,
+            encoder_attention_mask=cross_attention_mask,
             output_attentions=output_attentions,
+            output_hidden_states=True,
         )
 
-        if with_video:
-            out_features = bert_output.last_hidden_state[:, T:, :]
-        else:
-            out_features = bert_output.last_hidden_state
+        visual_features = bert_output.hidden_states[-1][:, T:, :]
+        textaul_embeddings = bert_output.hidden_states[-1][:, :T, :]
+        text_logits = bert_output.logits
 
-        out_logit = module.shared_encoder_header(out_features)  # b l vocab_size
-        return out_logit, bert_output.attentions
+        return visual_features, textaul_embeddings, text_logits, text_attention_mask
 
-    def train_step(self, module: lightning, batch, batch_idx):
-        ids, video, video_length, text = self.dispatch_batch(batch, module.device)
-        text_ids, labels, text_length = self.tokenize(
+    def train_step(
+        self, module: lightning, batch, batch_idx, visual_embeddings, v_length
+    ):
+        ids, _, _, text = self.dispatch_batch(batch, module.device)
+        text_ids, labels, text_mask = self.tokenize(
             text, module.tokenizer, module.device, use_mask=True
         )
 
-        out_logit, _ = self._forward(module, video, video_length, text_ids, text_length)
+        out_logit = self._forward(
+            module, visual_embeddings, v_length, text_ids, text_mask
+        )[-2]
 
         # Add numerical stability
         out_loglogit = F.log_softmax(out_logit, dim=-1)
@@ -244,14 +222,18 @@ class VTGHandle(BaseHandle):
         module.log("train_generate_loss", target_loss, prog_bar=True)
         return target_loss
 
-    def validation_step(self, module: lightning, batch, batch_idx):
-        ids, video, video_length, text = self.dispatch_batch(batch, module.device)
+    def validation_step(
+        self, module: lightning, batch, batch_idx, visual_embeddings, v_length
+    ):
+        ids, _, _, text = self.dispatch_batch(batch, module.device)
 
         B = len(ids)
 
         with torch.no_grad():
             # NOTE: max length in dev set is 50
-            generated = module.generate(video, video_length, max_length=50)
+            generated = module.generate(
+                video_embeddings=visual_embeddings, video_length=v_length, max_length=50
+            )
             generated = generated.cpu().tolist()
 
         for b in range(B):

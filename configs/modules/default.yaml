@@ -12,6 +12,7 @@ visual_adapter:
   num_extra_queries: 8
 
 bert_shared_encoder_id: dbmdz/bert-base-german-europeana-cased
+num_query_token: 64
 
 connector:
   _target_: modules.LinearConnector

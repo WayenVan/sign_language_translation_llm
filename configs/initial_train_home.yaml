@@ -23,13 +23,13 @@ vtg_random_replace_prob: 0.6
 vtg_mask_replace_prob: 0.3
 vtg_mask_ratio: 0.5
 
-vtm_flag: True
+vtm_flag: False
 vtm_mask_ratio: 0.40
 vtm_weight: 1.0
 vtm_random_replace_prob: 0.1
 vtm_mask_replace_prob: 0.8
 
-vtc_flag: True
+vtc_flag: False
 vtc_weight: 1.0
 vtc_queue_max_size: 2048
 
