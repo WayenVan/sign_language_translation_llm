@@ -37,9 +37,9 @@ def test_slt_model():
     ).cuda()
     loader = data_module.train_dataloader()
     for i, batch in enumerate(loader):
-        # model.training_step(batch, 0)
-        model.validation_step(batch, 0)
-        # print("ok")
+        model.training_step(batch, 0)
+        # model.validation_step(batch, 0)
+        print("ok")
 
 
 def test_slt_model_generation():

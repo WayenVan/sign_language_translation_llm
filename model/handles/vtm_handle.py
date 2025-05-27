@@ -3,7 +3,7 @@ import torch
 from .base_handle import BaseHandle
 from torch.nn import functional as F
 from torchmetrics import Accuracy
-from einops import rearrange
+from einops import rearrange, repeat
 from transformers import DataCollatorForWholeWordMask
 
 
@@ -57,32 +57,40 @@ class VTMHandle(BaseHandle):
 
     @staticmethod
     def generate_padding_attention_mask(
-        video_length, text_length, max_video_length=None, max_text_length=None
+        num_video_queries,
+        text_attention_mask,  # [B, L]
     ):
         """
         Generate addtivie attention mask for the video and text sequences.
         video_length: [B]
         text_length: [B]
         """
-        if max_video_length is None:
-            max_video_length = video_length.max().item()
-        if max_text_length is None:
-            max_text_length = text_length.max().item()
+        B, L = text_attention_mask.shape
+        device = text_attention_mask.device
 
-        video_mask = torch.arange(max_video_length, device=video_length.device).expand(
-            video_length.size(0), max_video_length
-        ) < video_length.unsqueeze(1)
-        text_mask = torch.arange(max_text_length, device=text_length.device).expand(
-            text_length.size(0), max_text_length
-        ) < text_length.unsqueeze(1)
+        text_mask = repeat(text_attention_mask, "b l -> b ll l", b=B, ll=L)
+        text_mask = F.pad(text_mask, (0, 0, num_video_queries, 0), value=0)
+        text_mask = F.pad(text_mask, (num_video_queries, 0), value=1)
+        # (B, L+num_video_queries, L + num_video_queries)
 
-        video_mask = video_mask.long()
-        text_mask = text_mask.long()
-        return torch.cat((video_mask, text_mask), dim=1).unsqueeze(
-            1
-        )  # for heads dimension and query dimension # (B,  1, L)
+        return text_mask  # (B, L + num_video_queries, L + num_video_queries)
 
-    def _forward(self, module, video, video_length, text, output_attentions=False):
+    @staticmethod
+    def length_to_mask(lengths, max_length=None):
+        """
+        Convert lengths to a boolean mask.
+        lengths: [B]
+        max_length: int, optional
+        """
+        if max_length is None:
+            max_length = lengths.max().item()
+        B = lengths.size(0)
+        mask = torch.arange(max_length, device=lengths.device).expand(
+            B, max_length
+        ) < lengths.unsqueeze(1)
+        return mask.long()  # (B, max_length)
+
+    def tokenize(self, module, text, device):
         tokenizer_outputs = module.tokenizer(
             text,
             return_tensors="pt",
@@ -90,7 +98,9 @@ class VTMHandle(BaseHandle):
             add_special_tokens=False,  # NOTE: <CLs> and <SEP> will be added by the model
         )
         text_ids = tokenizer_outputs["input_ids"].to(module.device)  # (B, L)
-        text_length = tokenizer_outputs["attention_mask"].sum(1).to(module.device)
+        text_attention_mask = tokenizer_outputs["attention_mask"].to(
+            module.device
+        )  # (B, L)
 
         # NOTE: masking the text token by data collator
         masked_output = self.collator(text_ids.cpu().tolist())
@@ -98,55 +108,61 @@ class VTMHandle(BaseHandle):
             masked_output["input_ids"].to(module.device),
             masked_output["labels"].to(module.device),
         )
+        return masked_text_ids, mask_text_labels, text_attention_mask
 
-        with torch.no_grad():
-            visual_encoder_outputs = module.visual_encoder(video, video_length)
-        hidden_state = visual_encoder_outputs.hidden_state
-        v_length = visual_encoder_outputs.video_length
-        visual_embeddings = module.visual_adapter(hidden_state)  # b t c
+    def _forward(
+        self,
+        module,
+        visual_features,  # [b t c]
+        v_length,  # [b]
+        text_ids,  # [B, L]
+        text_attention_mask,  # [b l]
+        output_attentions=False,
+    ):
+        B, T, C = visual_features.shape
+        B, L = text_ids.shape
 
-        with torch.no_grad():
-            textaul_embeddings = module.shared_encoder.get_input_embeddings()(
-                masked_text_ids
-            )  # b l c
-
-        B, T, C = visual_embeddings.shape
-        _, L, _ = textaul_embeddings.shape
-
-        assert T == v_length.max().item(), (
-            f"Visual length {T} does not match max video length {v_length.max().item()}"
-        )
-        assert L == text_length.max().item(), (
-            f"Text length {L} does not match max text length {text_length.max().item()}"
+        # create mask for shared encoder
+        padding_attention_casual = self.generate_padding_attention_mask(
+            module.num_query_token, text_attention_mask
         )
 
-        # 5. 生成注意力掩码
-        padding_attention_mask = self.generate_padding_attention_mask(
-            v_length, text_length
-        )
-        features = torch.cat((visual_embeddings, textaul_embeddings), dim=1)  # b t+l c
+        # create padding mask for the cross atttention with video
+        cross_attention_mask = self.length_to_mask(v_length, max_length=T)
 
+        # video query
+        video_query_tokens = module.video_query_tokens.expand(B, -1, -1)
+
+        # q-former forward
         bert_output = module.shared_encoder(
-            inputs_embeds=features,
-            attention_mask=padding_attention_mask,
+            input_ids=text_ids,
+            query_embeds=video_query_tokens,
+            attention_mask=padding_attention_casual,
+            encoder_hidden_states=visual_features,
+            encoder_attention_mask=cross_attention_mask,
             output_attentions=output_attentions,
+            output_hidden_states=True,
         )
-        out_features = bert_output.last_hidden_state[:, T:, :]
-        out_logit = module.shared_encoder_header(out_features)  # b l vocab_size
-        return out_logit, mask_text_labels, bert_output.attentions
 
-    def train_step(self, module, batch, batch_idx):
-        ids, video, video_length, text = self.dispatch_batch(batch, module.device)
+        visual_features = bert_output.hidden_states[-1][:, T:, :]
+        textaul_embeddings = bert_output.hidden_states[-1][:, :T, :]
+        text_logits = bert_output.logits
 
-        out_logit, mask_text_labels, _ = self._forward(
-            module, video, video_length, text
+        return visual_features, textaul_embeddings, text_logits, text_attention_mask
+
+    def train_step(
+        self, module: lightning, batch, batch_idx, visual_embeddings, v_length
+    ):
+        ids, _, _, text = self.dispatch_batch(batch, module.device)
+
+        masked_text_ids, mask_text_labels, text_attention_mask = self.tokenize(
+            module, text, module.device
+        )
+        _, _, out_logit, _ = self._forward(
+            module, visual_embeddings, v_length, masked_text_ids, text_attention_mask
         )
 
         out_loglogit = F.log_softmax(out_logit, dim=-1)
-
-        # Add NaN check
-        if torch.isnan(out_loglogit).any():
-            raise ValueError("NaN detected in log probabilities")
 
         self.train_accu.update(
             rearrange(out_loglogit, "b l c -> (b l) c"),
@@ -171,12 +187,19 @@ class VTMHandle(BaseHandle):
 
         return loss
 
-    def validation_step(self, module, batch, batch_idx):
-        ids, video, video_length, text = self.dispatch_batch(batch, module.device)
+    def validation_step(
+        self, module: lightning, batch, batch_idx, visual_embeddings, v_length
+    ):
+        ids, _, _, text = self.dispatch_batch(batch, module.device)
 
-        out_logit, mask_text_labels, _ = self._forward(
-            module, video, video_length, text
+        masked_text_ids, mask_text_labels, text_attention_mask = self.tokenize(
+            module, text, module.device
         )
+        _, _, out_logit, _ = self._forward(
+            module, visual_embeddings, v_length, masked_text_ids, text_attention_mask
+        )
+
+        out_loglogit = F.log_softmax(out_logit, dim=-1)
 
         self.val_accu.update(
             rearrange(out_logit, "b l c -> (b l) c"),
