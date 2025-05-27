@@ -14,7 +14,7 @@ engine:
 
 vtg_flag: True
 vtg_weight: 1.0
-vtg_mask_ratio: 0.8
+vtg_mask_ratio: 0.0
 vtg_random_replace_prob: 0.5
 vtg_mask_replace_prob: 0.5
 
@@ -24,7 +24,7 @@ vtm_weight: 1.0
 vtm_random_replace_prob: 0.1
 vtm_mask_replace_prob: 0.8
 
-vtc_flag: True
+vtc_flag: False
 vtc_weight: 1.0
 vtc_queue_max_size: 4096
 

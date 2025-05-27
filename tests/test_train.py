@@ -44,7 +44,7 @@ def train(cfg: DictConfig) -> None:
     # NOTE: define callbacks for trainer
     cbs = [
         callbacks.RichProgressBar(),
-        # DebugCallback(),
+        DebugCallback(),
     ]
 
     # NOTE: start training
@@ -103,6 +103,7 @@ class DebugCallback(callbacks.Callback):
 
             if param.grad is None:
                 continue
+
             logging.info(f"Param {name} has  mean: {param.mean()}, std: {param.std()}")
 
             if param.grad is not None:

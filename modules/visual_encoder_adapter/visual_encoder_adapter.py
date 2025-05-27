@@ -47,7 +47,7 @@ class VisualAdapter(nn.Module):
         )
         self.linear = nn.Linear(hidden_size, target_hidden_size)
 
-    def forward(self, x):
+    def forward(self, x, v_length):
         # x: (B, T, HW, C)
         B, T, HW, C = x.shape
         x = rearrange(x, "b t hw c -> (b t) hw c")
@@ -61,7 +61,7 @@ class VisualAdapter(nn.Module):
         feats = extra_queries.mean(dim=-2)  # (B T C)
         feats = self.linear(feats)
 
-        return feats
+        return feats, v_length
 
 
 class Block(nn.Module):

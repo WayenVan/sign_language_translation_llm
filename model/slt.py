@@ -125,7 +125,7 @@ class SLTModel(LightningModule):
 
         self.shared_encoder = BertLMHeadModel(self.bert_config)
         params = BertLMHeadModelFromHF.from_pretrained(
-            "dbmdz/bert-base-german-europeana-cased",
+            self.cfg.modules.bert_shared_encoder_id,
             device_map="cpu",
             torch_dtype=torch.float32,
         ).state_dict()
@@ -195,7 +195,9 @@ class SLTModel(LightningModule):
         """
         visual_outputs = self.visual_encoder(video, video_length)
         v_length = visual_outputs.video_length
-        visual_embeddings = self.visual_adapter(visual_outputs.hidden_state)
+        visual_embeddings, v_length = self.visual_adapter(
+            visual_outputs.hidden_state, v_length
+        )
         return visual_embeddings, v_length
 
     def training_step(self, batch, batch_idx):
@@ -235,7 +237,7 @@ class SLTModel(LightningModule):
 
     def train(self, is_train):
         super().train(is_train)
-        self.shared_encoder.embeddings.eval()
+        self.shared_encoder.bert.embeddings.eval()
         self.visual_encoder.eval()
 
         for name, handle in self.handles.items():
