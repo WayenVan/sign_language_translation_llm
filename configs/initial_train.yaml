@@ -1,6 +1,6 @@
 defaults:
   - base_train
-  # - override modules: vitpose_base
+  # - override modules: stvit_adapter
   - _self_
 
 debug: False
@@ -18,11 +18,11 @@ vtg_mask_ratio: 0.0
 vtg_random_replace_prob: 0.5
 vtg_mask_replace_prob: 0.5
 
-vtm_flag: False
-vtm_mask_ratio: 0.40
+vtm_flag: True
+vtm_mask_ratio: 0.8
 vtm_weight: 1.0
-vtm_random_replace_prob: 0.1
-vtm_mask_replace_prob: 0.8
+vtm_random_replace_prob: 0.3
+vtm_mask_replace_prob: 0.6
 
 vtc_flag: False
 vtc_weight: 1.0
