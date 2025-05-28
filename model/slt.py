@@ -105,9 +105,9 @@ class SLTModel(LightningModule):
         self.visual_adapter = instantiate(self.cfg.modules.visual_adapter)
 
         # NOTE: visual bacbone is frozen
-        for paras in self.visual_encoder.parameters():
-            paras.requires_grad = False
-        self.visual_encoder.eval()
+        # for paras in self.visual_encoder.parameters():
+        #     paras.requires_grad = False
+        # self.visual_encoder.eval()
 
     def _create_bert_shared_encoder(self, cross_attention_freq=2):
         self.num_query_token = self.cfg.modules.num_query_token
@@ -238,7 +238,7 @@ class SLTModel(LightningModule):
     def train(self, is_train):
         super().train(is_train)
         self.shared_encoder.bert.embeddings.eval()
-        self.visual_encoder.eval()
+        # self.visual_encoder.eval()
 
         for name, handle in self.handles.items():
             handle.train_handle(self, is_train)
@@ -260,8 +260,8 @@ class SLTModel(LightningModule):
         for name in list(checkpoint.keys()):
             if name.startswith("llm"):
                 del checkpoint[name]
-            if name.startswith("visual_encoder"):
-                del checkpoint[name]
+            # if name.startswith("visual_encoder"):
+            #     del checkpoint[name]
         return checkpoint
 
     @staticmethod

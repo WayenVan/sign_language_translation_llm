@@ -10,6 +10,8 @@ devices: [0]
 
 data:
   batch_size: 2
+  datamodule:
+    num_workers: 16
 
 engine:
   lr_scheduler:
