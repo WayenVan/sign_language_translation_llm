@@ -1,0 +1,22 @@
+visual_encoder:
+  _target_: modules.SapeinsVisualEncoder
+  cfg: sapeins_configs/sapiens_pose/coco_wholebody/sapiens_0.3b-210e_coco_wholebody-1024x768.py
+  ckpt: outputs/sapiens_0.3b_coco_wholebody_best_coco_wholebody_AP_620.pth
+  hidden_states_layer: -2
+
+visual_adapter:
+  _target_: modules.VisualAdapter
+  hidden_size: 1024
+  target_hidden_size: 768
+  num_heads: 8
+  num_layers: 2
+  num_extra_queries: 8
+
+bert_shared_encoder_id: dbmdz/bert-base-german-europeana-cased
+num_query_token: 64
+
+connector:
+  _target_: modules.LinearConnector
+  in_features: 768
+  out_features: 1152 #gemma3 1b
+  # out_features: 2560 #gemma3 1b

@@ -10,9 +10,11 @@ from .feedforwards.llama_mlp import LlamaMLP
 from .embedding.embedding import LLMCompressEmbedding
 from .linear_connector.linear_connector import LinearConnector
 from .spatial_temporal_adapter.spatial_temporal_adapter import SpatialTemporalAdapter
+from .sapeins_encoder.sapeins_encoder import SapeinsVisualEncoder
 
 
 __all__ = [
+    "SapeinsVisualEncoder",
     "SpatialTemporalAdapter",
     "LinearConnector",
     "VitPoseVisualEncoder",

@@ -5,11 +5,16 @@ from misc import hack_registry
 from mmpose.apis import init_model
 
 from PIL import Image
-from torchvision.transforms import functional as F
+import torchvision.transforms.functional as F
 import torch
 from transformers.generation.utils import GenerationMixin
+from mmpretrain.models.backbones.vision_transformer import VisionTransformer
 
+from mmengine.config import Config
 import matplotlib.pyplot as plt
+
+from einops import rearrange
+import numpy as np
 
 
 model = init_model(

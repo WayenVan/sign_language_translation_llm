@@ -15,10 +15,14 @@ transforms:
       - _target_: data.transforms.RandomCropVideo
         height: 256
         width: 192
-      - _target_: data.transforms.NormalizeVideo
-        max_pixel_value: 1.0
-        mean: [0.485, 0.456, 0.406]
-        std: [0.229, 0.224, 0.225]
+      - _target_: data.transforms.ResizeVideo
+        height: 512
+        width: 384
+      # WARN: disable normalization
+      # - _target_: data.transforms.NormalizeVideo
+      #   max_pixel_value: 1.0
+      #   mean: [0.485, 0.456, 0.406]
+      #   std: [0.229, 0.224, 0.225]
       - _target_: data.transforms.ToTensorVideo
 
   val:
@@ -32,10 +36,13 @@ transforms:
       - _target_: data.transforms.CenterCropVideo
         height: 256
         width: 192
-      - _target_: data.transforms.NormalizeVideo
-        max_pixel_value: 1.0
-        mean: [0.485, 0.456, 0.406]
-        std: [0.229, 0.224, 0.225]
+      - _target_: data.transforms.ResizeVideo
+        height: 512
+        width: 384
+      # - _target_: data.transforms.NormalizeVideo
+      #   max_pixel_value: 1.0
+      #   mean: [0.485, 0.456, 0.406]
+      #   std: [0.229, 0.224, 0.225]
       - _target_: data.transforms.ToTensorVideo
 
   test: null # NOTE: same as the val
