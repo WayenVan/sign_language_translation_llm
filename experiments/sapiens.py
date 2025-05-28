@@ -1,15 +1,20 @@
+import sys
+
+sys.path.append(".")
+from misc import hack_registry
 from mmpose.apis import init_model
 
 from PIL import Image
 from torchvision.transforms import functional as F
 import torch
+from transformers.generation.utils import GenerationMixin
 
 import matplotlib.pyplot as plt
 
 
 model = init_model(
-    "sapiens_pose_configs/sapiens_pose/coco_wholebody/sapiens_0.6b-210e_coco_wholebody-1024x768.py",
-    checkpoint="outputs/sapiens_0.6b_goliath_best_goliath_mIoU_7777_epoch_178.pth?download=true",
+    "sapeins_configs/sapiens_pose/coco_wholebody/sapiens_0.3b-210e_coco_wholebody-1024x768.py",
+    checkpoint="outputs/sapiens_0.3b_coco_wholebody_best_coco_wholebody_AP_620.pth",
     device="cpu",
 )
 
@@ -22,7 +27,7 @@ for name, param in model.named_parameters():
 # input_image = Image.open("/root/shared-data/Radar_Yao/outputs/video/video_20.png")
 input_image = Image.open("outputs/visualization_val/110.jpg")
 input_image = input_image.convert("RGB")
-input_image = F.resize(input_image, (1024, 768), antialias=True)
+input_image = F.resize(input_image, (512, 384), antialias=True)
 
 input_tensor = F.to_tensor(input_image) * 255.0
 input_tensor = F.normalize(
@@ -37,9 +42,8 @@ input_batch = input_tensor.unsqueeze(
 
 with torch.no_grad():
     output = model(input_batch)
-    output = torch.sigmoid(output)
 
 
-for i in range(28):
+for i in range(133):
     plt.imshow(output[0][i].cpu().numpy(), vmin=0.0, vmax=1.0)
     plt.savefig(f"outputs/sapiens_pose/{i}.jpg")
