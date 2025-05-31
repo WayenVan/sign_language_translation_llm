@@ -26,14 +26,13 @@ def test_max_data_length():
 
 def test_dataset():
     data_root = "/root/projects/slt_set_llms/dataset/PHOENIX-2014-T-release-v3"
-    keyword_dir = "/root/projects/slt_set_llms/outputs/keywords"
     mode = "train"
 
-    dataset = Ph14TDataset(data_root, keyword_dir, mode)
+    dataset = Ph14TDataset(data_root, mode)
 
     for i in tqdm(range(len(dataset))):
         data = dataset[i]
-        print(data["keywords"])
+        print(data["video"].shape)
 
 
 def test_datamodule():
@@ -76,7 +75,7 @@ def test_data_validation():
 
 
 if __name__ == "__main__":
-    # test_dataset()
+    test_dataset()
     # test_datamodule()
-    test_data_validation()
+    # test_data_validation()
     # test_max_data_length()
