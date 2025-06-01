@@ -1,7 +1,7 @@
 defaults:
   - base_train
-  - override modules: sapiens_0.3b
-  - override data: ph14t_512x384_wonorm
+  # - override modules: sapiens_0.3b
+  # - override data: ph14t_512x384_wonorm
   - _self_
 
 debug: False

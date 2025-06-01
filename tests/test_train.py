@@ -44,7 +44,7 @@ def train(cfg: DictConfig) -> None:
     # NOTE: define callbacks for trainer
     cbs = [
         callbacks.RichProgressBar(),
-        # DebugCallback(),
+        DebugCallback(),
     ]
 
     # NOTE: start training

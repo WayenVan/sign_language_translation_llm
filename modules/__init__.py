@@ -11,9 +11,12 @@ from .embedding.embedding import LLMCompressEmbedding
 from .linear_connector.linear_connector import LinearConnector
 from .spatial_temporal_adapter.spatial_temporal_adapter import SpatialTemporalAdapter
 from .sapeins_encoder.sapeins_encoder import SapeinsVisualEncoder
+from .freezer import FullFreezer, NoFreezer
 
 
 __all__ = [
+    "FullFreezer",
+    "NoFreezer",
     "SapeinsVisualEncoder",
     "SpatialTemporalAdapter",
     "LinearConnector",

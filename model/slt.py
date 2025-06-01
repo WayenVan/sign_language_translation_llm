@@ -50,6 +50,12 @@ class SLTModel(LightningModule):
         self._create_bert_shared_encoder()
         self._create_handles()
 
+        self.freezer = instantiate(
+            self.cfg.modules.freezer, visual_encoder=self.visual_encoder
+        )
+        # NOTE: freeze the visual encoder by freezer
+        self.freezer.freeze()
+
     def _create_llm(self):
         self.connector = instantiate(self.cfg.modules.connector)
         if self.cfg.inference_mode or self.pl_flag:
@@ -103,11 +109,6 @@ class SLTModel(LightningModule):
     def _create_visual_layers(self):
         self.visual_encoder = instantiate(self.cfg.modules.visual_encoder)
         self.visual_adapter = instantiate(self.cfg.modules.visual_adapter)
-
-        # NOTE: visual bacbone is frozen
-        for paras in self.visual_encoder.parameters():
-            paras.requires_grad = False
-        self.visual_encoder.eval()
 
     def _create_bert_shared_encoder(self, cross_attention_freq=2):
         self.num_query_token = self.cfg.modules.num_query_token
@@ -242,6 +243,9 @@ class SLTModel(LightningModule):
 
         for name, handle in self.handles.items():
             handle.train_handle(self, is_train)
+
+        # NOTE: delegate the train to the freezer
+        self.freezer.train(is_train)
 
     def forward(self, is_train):
         pass

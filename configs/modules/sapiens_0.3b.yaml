@@ -20,3 +20,6 @@ connector:
   in_features: 768
   out_features: 1152 #gemma3 1b
   # out_features: 2560 #gemma3 1b
+  #
+freezer:
+  _target_: modules.FullFreezer
