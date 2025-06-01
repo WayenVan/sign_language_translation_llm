@@ -1,0 +1,16 @@
+visual_encoder:
+  _target_: modules.TimmVisualEncoder
+  backbone_id: "resnet18"
+
+visual_adapter:
+  _target_: modules.LinearAdapter
+  input_dim: 512
+  output_dim: 768
+
+bert_shared_encoder_id: dbmdz/bert-base-german-europeana-cased
+num_query_token: 64
+
+connector:
+  _target_: modules.LinearConnector
+  in_features: 768
+  out_features: 1152 #gemma3 1b

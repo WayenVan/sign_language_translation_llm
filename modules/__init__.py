@@ -12,8 +12,13 @@ from .linear_connector.linear_connector import LinearConnector
 from .spatial_temporal_adapter.spatial_temporal_adapter import SpatialTemporalAdapter
 from .sapeins_encoder.sapeins_encoder import SapeinsVisualEncoder
 
+from .identity_adapter import IdentityAdapter
+from .linear_adapter import LinearAdapter
+
 
 __all__ = [
+    "LinearAdapter",
+    "IdentityAdapter",
     "SapeinsVisualEncoder",
     "SpatialTemporalAdapter",
     "LinearConnector",

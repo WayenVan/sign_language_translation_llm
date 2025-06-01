@@ -2,14 +2,13 @@ import torch
 from torch import nn
 from einops import rearrange, reduce, repeat
 import timm
-from .tconv import TemporalConv1D
+from collections import namedtuple
 
 
 class TimmVisualEncoder(nn.Module):
     def __init__(
         self,
         backbone_id,
-        out_channels,
         dropout=0.5,
         **kwargs,
     ):
@@ -23,6 +22,10 @@ class TimmVisualEncoder(nn.Module):
         self.dropout = nn.Dropout(dropout)
         self.backbone_out_feautres = self.backbone.num_features
 
+    TimmVisualEncoderOutput = namedtuple(
+        "TimmVisualEncoderOutput", ["hidden_state", "video_length"]
+    )
+
     def forward(self, x, v_length=None):
         """
         @param x: the input video tensor [batch_size, time, 3, height, width]
@@ -35,4 +38,19 @@ class TimmVisualEncoder(nn.Module):
         visual_features = rearrange(
             visual_features, "(b t) c -> b t c", b=B, t=T
         ).contiguous()
-        return visual_features, v_length
+        return self.TimmVisualEncoderOutput(
+            hidden_state=visual_features,
+            video_length=v_length,
+        )
+
+
+if __name__ == "__main__":
+    # Example usage
+    model = TimmVisualEncoder("resnet18", out_channels=512)
+    video_tensor = torch.randn(
+        2, 10, 3, 224, 224
+    )  # [batch_size, time, channels, height, width]
+    v_length = torch.tensor([10, 10])  # Length of each video in the batch
+    features, lengths = model(video_tensor, v_length)
+    print(features.shape)  # Should print: torch.Size([2, 10, 512])
+    print(lengths)  # Should print: tensor([10, 10])
