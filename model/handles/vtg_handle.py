@@ -146,10 +146,9 @@ class VTGHandle(BaseHandle):
         if max_length is None:
             max_length = lengths.max().item()
         B = lengths.size(0)
-        mask = torch.arange(
-            max_length, device=lengths.device
-        ).expand() < lengths.unsqueeze(1)
-        B, max_length
+        mask = torch.arange(max_length, device=lengths.device).expand(
+            B, max_length
+        ) < lengths.unsqueeze(1)
         return mask.long()  # (B, max_length)
 
     def _forward(
