@@ -144,8 +144,8 @@ class VTMHandle(BaseHandle):
             output_hidden_states=True,
         )
 
-        visual_features = bert_output.hidden_states[-1][:, T:, :]
-        textaul_embeddings = bert_output.hidden_states[-1][:, :T, :]
+        visual_features = bert_output.hidden_states[-1][:, :-L, :]
+        textaul_embeddings = bert_output.hidden_states[-1][:, -L:, :]
         text_logits = bert_output.logits
 
         return visual_features, textaul_embeddings, text_logits, text_attention_mask

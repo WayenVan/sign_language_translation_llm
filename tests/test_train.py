@@ -29,9 +29,7 @@ cv2.setNumThreads(0)  # NOTE: set the number of threads to 0 to avoid cv2 error
 
 
 # NOTE: the hydra appp only inisitalize once
-@hydra.main(
-    config_path="../configs", config_name="initial_train_l40s", version_base="1.3.2"
-)
+@hydra.main(config_path="../configs", config_name="initial_train", version_base="1.3.2")
 def main(cfg: DictConfig) -> None:
     train(cfg)
 

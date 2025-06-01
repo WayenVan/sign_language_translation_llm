@@ -24,14 +24,15 @@ def test_vtg_handle_mask():
 
 
 def test_vtc_handle_mask():
-    mask = VTCHandle.generate_padding_attention_mask(
-        torch.tensor([5, 3]), torch.tensor([4, 2])
+    mask = VTCHandle.generate_padding_casual_attention_mask(
+        5, torch.tensor([[1, 1, 1, 1], [1, 1, 0, 0]])
     )
     print(mask)
+    print(mask.shape)  # Should be (2,  1, 12)
 
 
 if __name__ == "__main__":
     # test_handle()
     # test_vtg_handle_mask()
-    test_vtm_handle_mask()
     # test_vtm_handle_mask()
+    test_vtc_handle_mask()

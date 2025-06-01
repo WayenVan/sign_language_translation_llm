@@ -146,9 +146,10 @@ class VTGHandle(BaseHandle):
         if max_length is None:
             max_length = lengths.max().item()
         B = lengths.size(0)
-        mask = torch.arange(max_length, device=lengths.device).expand(
-            B, max_length
-        ) < lengths.unsqueeze(1)
+        mask = torch.arange(
+            max_length, device=lengths.device
+        ).expand() < lengths.unsqueeze(1)
+        B, max_length
         return mask.long()  # (B, max_length)
 
     def _forward(
@@ -185,8 +186,8 @@ class VTGHandle(BaseHandle):
             output_hidden_states=True,
         )
 
-        visual_features = bert_output.hidden_states[-1][:, T:, :]
-        textaul_embeddings = bert_output.hidden_states[-1][:, :T, :]
+        visual_features = bert_output.hidden_states[-1][:, :-L, :]
+        textaul_embeddings = bert_output.hidden_states[-1][:, -L:, :]
         text_logits = bert_output.logits
 
         return visual_features, textaul_embeddings, text_logits, text_attention_mask

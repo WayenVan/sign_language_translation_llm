@@ -3,6 +3,10 @@ from .base_handle import BaseHandle
 from misc.clip_loss import clip_loss
 from typing import List
 from misc.circular_queue import CircularQueue
+from torch.nn import functional as F
+from lightning.pytorch import LightningModule
+
+from einops import rearrange, einsum
 
 
 class VTCHandle(BaseHandle):
@@ -13,18 +17,18 @@ class VTCHandle(BaseHandle):
     def __init__(self, hiddent_size, cfg):
         super().__init__()
         self.loss_weight = cfg.vtc_weight
-        self.queue_max_size = cfg.vtc_queue_max_size
         self.hiddent_size = hiddent_size
-        self.queue_initialized = False
+        # self.queue_max_size = cfg.vtc_queue_max_size
+        # self.queue_initialized = False
 
-    def _initiate_queue(self, device, dtype):
-        self.visual_queue = CircularQueue(
-            self.queue_max_size, self.hiddent_size, device, dtype
-        )
-        self.text_queue = CircularQueue(
-            self.queue_max_size, self.hiddent_size, device, dtype
-        )
-        self.queue_initialized = True
+    # def _initiate_queue(self, device, dtype):
+    #     self.visual_queue = CircularQueue(
+    #         self.queue_max_size, self.hiddent_size, device, dtype
+    #     )
+    #     self.text_queue = CircularQueue(
+    #         self.queue_max_size, self.hiddent_size, device, dtype
+    #     )
+    #     self.queue_initialized = True
 
     def dispatch_batch(self, batch, device):
         ids = batch["ids"]
@@ -40,47 +44,32 @@ class VTCHandle(BaseHandle):
         """
         # self.visual_queue.reset()
         # self.text_queue.reset()
+        pass
 
     @staticmethod
-    def generate_padding_attention_mask(
-        video_length, text_length, max_video_length=None, max_text_length=None
+    def generate_padding_casual_attention_mask(
+        num_video_queries,
+        text_attention_mask,  # [B, L]
     ):
         """
         Generate addtivie attention mask for the video and text sequences.
         video_length: [B]
         text_length: [B]
         """
-        B = video_length.size(0)
-        assert video_length.size(0) == text_length.size(0), (
-            f"video length {video_length.size(0)} does not match text length {text_length.size(0)}"
+        B, L = text_attention_mask.shape
+        device = text_attention_mask.device
+
+        text_mask = F.pad(text_attention_mask, (num_video_queries, 0), value=1)
+        text_mask = text_mask.unsqueeze(1)  # (B, 1, L + num_video_queries)
+
+        mask = torch.ones(
+            (B, L + num_video_queries, L + num_video_queries), device=device
         )
 
-        if max_video_length is None:
-            max_video_length = video_length.max().item()
-        if max_text_length is None:
-            max_text_length = text_length.max().item()
+        mask[:, num_video_queries:, :num_video_queries] = 0
+        mask[:, :num_video_queries, num_video_queries:] = 0
 
-        video_mask = torch.arange(max_video_length, device=video_length.device).expand(
-            video_length.size(0), max_video_length
-        ) < video_length.unsqueeze(1)
-        text_mask = torch.arange(max_text_length, device=text_length.device).expand(
-            text_length.size(0), max_text_length
-        ) < text_length.unsqueeze(1)
-
-        video_mask = video_mask.long()
-        text_mask = text_mask.long()
-        padding_mask = torch.cat((video_mask, text_mask), dim=1).unsqueeze(
-            1
-        )  # for heads dimension and query dimension # (B,  1, L)   kkkk
-
-        forbidden_mask = torch.ones(
-            B, max_video_length + max_text_length, max_video_length + max_text_length
-        ).to(video_length.device)
-
-        forbidden_mask[:, max_video_length:, :max_video_length] = 0
-        forbidden_mask[:, :max_video_length, max_video_length:] = 0
-
-        return padding_mask * forbidden_mask
+        return text_mask * mask  # (B, L + num_video_queries, L + num_video_queries)
 
     def tokenize(self, text: List[str], tokenizer, device):
         """
@@ -104,130 +93,135 @@ class VTCHandle(BaseHandle):
 
         return (
             torch.LongTensor(input_outputs["input_ids"]).to(device),
-            torch.LongTensor(input_outputs["attention_mask"])
-            .sum(dim=1)
-            .to(device),  # (B), text length
+            torch.LongTensor(input_outputs["attention_mask"]).to(
+                device
+            ),  # (B), text length
         )
 
-    def _forward(self, module, video, video_length, text_ids, text_length):
-        with torch.no_grad():
-            visual_encoder_outputs = module.visual_encoder(video, video_length)
-        hidden_state = visual_encoder_outputs.hidden_state
-        v_length = visual_encoder_outputs.video_length
-        visual_embeddings = module.visual_adapter(hidden_state)  # b t c
+    @staticmethod
+    def length_to_mask(lengths, max_length=None):
+        """
+        Convert lengths to a boolean mask.
+        lengths: [B]
+        max_length: int, optional
+        """
+        if max_length is None:
+            max_length = lengths.max().item()
+        B = lengths.size(0)
+        mask = torch.arange(max_length, device=lengths.device).expand(
+            B, max_length
+        ) < lengths.unsqueeze(1)
+        return mask.long()  # (B, max_length)
 
-        with torch.no_grad():
-            textaul_embeddings = module.shared_encoder.get_input_embeddings()(
-                text_ids
-            )  # b l c
+    def _forward(
+        self,
+        module,
+        visual_features,  # [b t c]
+        v_length,  # [b]
+        text_ids,  # [B, L]
+        text_attention_mask,  # [b l]
+        output_attentions=False,
+    ):
+        B, T, C = visual_features.shape
+        B, L = text_ids.shape
 
-        B, T, C = visual_embeddings.shape
-        _, L, _ = textaul_embeddings.shape
-
-        assert T == v_length.max().item(), (
-            f"Visual length {T} does not match max video length {v_length.max().item()}"
-        )
-        assert L == text_length.max().item(), (
-            f"Text length {L} does not match max text length {text_length.max().item()}"
-        )
-
-        # NOTE: add visual cls token to the model
-        visual_embeddings = torch.cat(
-            (module.video_cls_token.expand(B, -1, -1).contiguous(), visual_embeddings),
-            dim=1,
-        )
-        v_length = v_length + 1
-
-        # 5. 生成注意力掩码
-        padding_attention_mask = self.generate_padding_attention_mask(
-            v_length, text_length
-        )
-        features = torch.cat((visual_embeddings, textaul_embeddings), dim=1)  # b t+l c
-
-        out_features = module.shared_encoder(
-            inputs_embeds=features,
-            attention_mask=padding_attention_mask,
-        )
-        text_cls_feature = out_features.last_hidden_state[:, T, :]
-        visual_cls_feature = out_features.last_hidden_state[:, 0, :]
-
-        return visual_cls_feature, text_cls_feature, text_length
-
-    def train_step(self, module, batch, batch_idx):
-        ids, video, video_length, text = self.dispatch_batch(batch, module.device)
-        text_ids, text_length = self.tokenize(text, module.tokenizer, module.device)
-        text_out_features, visual_out_features, text_length = self._forward(
-            module, video, video_length, text_ids, text_length
+        # create mask for shared encoder
+        padding_attention_casual = self.generate_padding_casual_attention_mask(
+            module.num_query_token, text_attention_mask
         )
 
-        # initialize the queue if not already done
-        if not self.queue_initialized:
-            self._initiate_queue(module.device, visual_out_features.dtype)
+        # create padding mask for the cross atttention with video
+        cross_attention_mask = self.length_to_mask(v_length, max_length=T)
 
-        # NOTE: get cached viual text pair from the queue
-        total_visual_logits = torch.cat(
-            [visual_out_features, self.visual_queue.get_queue()], dim=0
-        ).contiguous()
-        total_text_logits = torch.cat(
-            [text_out_features, self.text_queue.get_queue()], dim=0
-        ).contiguous()
+        # video query
+        video_query_tokens = module.video_query_tokens.expand(B, -1, -1)
 
-        # WARN: in case all labels are -100, the loss will be 0, impossible situation
-        # because the mask_token will reproduce if no token is masked
-        loss = (
-            clip_loss(
-                total_visual_logits,
-                total_text_logits,
-                module.contrastive_logit_scale,
-            )
-            * self.loss_weight
+        # q-former forward
+        bert_output = module.shared_encoder(
+            input_ids=text_ids,
+            query_embeds=video_query_tokens,
+            attention_mask=padding_attention_casual,
+            encoder_hidden_states=visual_features,
+            encoder_attention_mask=cross_attention_mask,
+            output_attentions=output_attentions,
+            output_hidden_states=True,
         )
 
-        module.log("train_contrastive_loss", loss, prog_bar=True)
+        visual_features = bert_output.hidden_states[-1][:, :-L, :]
+        textaul_embeddings = bert_output.hidden_states[-1][:, -L, :]
+        text_logits = bert_output.logits
 
-        with torch.no_grad():
-            # NOTE: all gather all other features
-            gather_visual_feature = module.all_gather(visual_out_features)
-            gather_text_feature = module.all_gather(text_out_features)
+        return visual_features, textaul_embeddings, text_logits, text_attention_mask
 
-            # NOTE: put the pairs into the queue
-            self.visual_queue.enqueue(
-                torch.cat(gather_visual_feature, dim=0).detach().contiguous()
-            )
-            self.text_queue.enqueue(
-                torch.cat(gather_text_feature, dim=0).detach().contiguous()
-            )
+    def contrastive_loss(
+        self, module: LightningModule, visual_features, text_features, label_smooth=0.1
+    ):
+        """
+        visual_features: [B, T, C]
+        text_features: [B,  C]
+        """
+        current_rank = module.global_rank
+        B, T, C = visual_features.shape
 
+        visual_features = F.normalize(visual_features, dim=-1)
+        text_features = F.normalize(text_features, dim=-1)
+
+        global_text_features = module.all_gather(text_features)
+        global_text_features = rearrange(global_text_features, "w b c -> (w b) c")
+
+        v2t = einsum(
+            visual_features,
+            global_text_features,
+            "b t c, wb c -> b t wb ",
+        )
+        v2t = v2t.max(dim=-2).values
+
+        # ------------------ text to visual features ------------------
+
+        global_visual_features = module.all_gather(visual_features)  # [w B T C]
+        t2v = einsum(
+            text_features,
+            global_visual_features,
+            "b c, w bv t c -> w b bv t",
+        )
+        t2v = t2v.max(dim=-1).values
+        t2v = rearrange(t2v, "w b bv -> b (w bv)")
+
+        # ------------------ gather the target ------------------
+
+        target = torch.arange(
+            current_rank * B, current_rank * B + B, device=visual_features.device
+        )
+
+        if t2v.shape[-1] == 1:
+            assert v2t.shape[-1] == 1, "Both should be 1 if one is 1"
+            # WARN: if there is only one video, we cannot use cross entropy loss
+            # use bce loss instead
+            loss = (
+                F.binary_cross_entropy_with_logits(v2t, torch.ones_like(v2t).float())
+                + F.binary_cross_entropy_with_logits(t2v, torch.ones_like(t2v).float())
+            ) / 2.0
+        else:
+            loss = (
+                F.cross_entropy(v2t, target, label_smoothing=label_smooth)
+                + F.cross_entropy(t2v, target, label_smoothing=label_smooth)
+            ) / 2.0
         return loss
 
-    def validation_step(self, module, batch, batch_idx):
-        ids, video, video_length, text = self.dispatch_batch(batch, module.device)
-        text_ids, text_length = self.tokenize(text, module.tokenizer, module.device)
-        text_out_features, visual_out_features, text_length = self._forward(
-            module, video, video_length, text_ids, text_length
+    def train_step(self, module, batch, batch_idx, visual_embeddings, v_length):
+        ids, _, _, text = self.dispatch_batch(batch, module.device)
+        text_ids, text_mask = self.tokenize(text, module.tokenizer, module.device)
+
+        visual_features, text_features, _, _ = self._forward(
+            module, visual_embeddings, v_length, text_ids, text_mask
         )
 
-        # initialize the queue if not already done
-        if not self.queue_initialized:
-            self._initiate_queue(module.device, visual_out_features.dtype)
+        target_loss = (
+            self.contrastive_loss(module, visual_features, text_features, 0.1)
+            * self.loss_weight
+        )
+        module.log("train_contrastive_loss", target_loss, prog_bar=True)
+        return target_loss
 
-        with torch.no_grad():
-            # NOTE: get cached viual text pair from the queue
-            total_visual_logits = torch.cat(
-                [visual_out_features, self.visual_queue.get_queue()], dim=0
-            )
-            total_text_logits = torch.cat(
-                [text_out_features, self.text_queue.get_queue()], dim=0
-            )
-
-            # WARN: in case all labels are -100, the loss will be 0, impossible situation
-            # because the mask_token will reproduce if no token is masked
-            loss = (
-                clip_loss(
-                    total_visual_logits,
-                    total_text_logits,
-                    module.contrastive_logit_scale,
-                )
-                * self.loss_weight
-            )
-            module.log("val_contrastive_loss", loss, prog_bar=True)
+    def validation_step(self, module, batch, batch_idx, visual_embeddings, v_length):
+        pass
