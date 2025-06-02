@@ -1,0 +1,98 @@
+import sys
+
+sys.path.append(".")
+from misc import hack_registry
+from mmpose.apis import init_model
+
+from PIL import Image
+import torchvision.transforms.functional as F
+import torch
+from transformers.generation.utils import GenerationMixin
+from mmpretrain.models.backbones.vision_transformer import VisionTransformer
+
+from mmengine.config import Config
+import matplotlib.pyplot as plt
+
+from einops import rearrange
+import numpy as np
+from collections import namedtuple
+
+from .vit import ViT
+from .top_down import TopDown
+from .heads import TopdownHeatmapSimpleHead
+
+
+class MMVitPoseEncoder(torch.nn.Module):
+    def __init__(self, cfg, ckpt, hidden_states_layer):
+        super().__init__()
+        self.id = id
+        self.cfg = Config.fromfile(cfg)
+        self.ckpt = ckpt
+        self.hidden_states_layer = hidden_states_layer
+
+        self.model: ViT = init_model(cfg, ckpt, device="cpu").backbone
+
+        # NOTE: setup the output indices
+        self.model.out_indices = tuple(range(len(self.model.layers)))
+        self.model.out_type = "raw"
+
+        # NOTE: normalization
+
+    @torch.no_grad()
+    def _normalize(self, video):
+        # video: (B, T, C, H, W)
+        mean = np.array([0.485, 0.456, 0.406], dtype=np.float32)
+        std = np.array([0.229, 0.224, 0.225], dtype=np.float32)
+        video = F.normalize(
+            video,
+            mean=mean.tolist(),
+            std=std.tolist(),
+        )
+        return video
+
+    MMVitPoseEncoderOutput = namedtuple(
+        "MMVitPoseEncoderOutput", ["hidden_state", "video_length"]
+    )
+
+    def forward(
+        self,
+        video,
+        video_length,
+    ):
+        # video: (B, T, C, H, W)
+        B, T, C, H, W = video.shape
+
+        video = rearrange(video, "b t c h w -> (b t) c h w")
+        normalized_video = self._normalize(video)
+        outputs = self.model(
+            normalized_video,
+        )
+        return self.MMVitPoseEncoderOutput(
+            hidden_state=rearrange(
+                outputs[self.hidden_states_layer],
+                "(b t) hw d -> b t hw d",
+                b=B,
+                t=T,
+            ),
+            video_length=video_length,
+        )
+
+
+if __name__ == "__main__":
+    model = MMVitPoseEncoder(
+        cfg="vitpose_configs/wholebody/2d_kpt_sview_rgb_img/topdown_heatmap/coco-wholebody/ViTPose_base_wholebody_256x192.py",
+        ckpt="outputs/sapiens_0.3b_coco_wholebody_best_coco_wholebody_AP_620.pth",
+        hidden_states_layer=-1,  # last layer
+    )
+
+    model.cuda()
+    video = Image.open("outputs/visualization_val/110.jpg")
+    video = video.convert("RGB")
+    video = F.resize(video, (512, 384), antialias=True)
+    video = F.to_tensor(video)
+    video = video.unsqueeze(0).unsqueeze(0)  # (1, 1, C, H, W)
+    video = video.repeat(1, 10, 1, 1, 1)  # (1, 10, C, H, W)
+    video_length = torch.tensor([10], dtype=torch.int64)  # (B,)
+
+    output = model(video.cuda(), video_length.cuda())
+    print("Hidden state shape:", output.hidden_state.shape)  # (B, T, HW, D)
