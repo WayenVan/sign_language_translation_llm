@@ -5,6 +5,9 @@ from torchmetrics.text import BLEUScore
 import torch.nn.functional as F
 from typing import List
 from einops import rearrange
+import logging
+
+logger = logging.getLogger(__name__)  # NOTE: lightning already setup the logger for us
 
 
 class PLHandle(BaseHandle):
@@ -178,6 +181,11 @@ class PLHandle(BaseHandle):
         )
         visual_features = self._forward_q_former(module, visual_embeddings, v_length)
         out_logit = self._forward_llm(module, visual_features, text_ids, text_mask)
+
+        if out_logit.isnan().any():
+            logger.warning(
+                f"NaN detected, ids: {ids}, text: {text}, visual_features:{visual_features.mean()}, out_logit:{out_logit.mean()}"
+            )
 
         # Add numerical stability
         out_loglogit = F.log_softmax(out_logit, dim=-1)

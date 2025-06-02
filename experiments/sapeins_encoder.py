@@ -1,7 +1,6 @@
 import sys
 
 sys.path.append(".")
-from misc import hack_registry
 from mmpose.apis import init_model
 
 from PIL import Image

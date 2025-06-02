@@ -9,6 +9,7 @@ sys.path.append(
 import hydra
 from hydra.utils import instantiate
 from omegaconf import DictConfig, OmegaConf
+from torch.optim import Optimizer
 
 from lightning import Trainer
 from lightning.pytorch import callbacks
@@ -45,32 +46,14 @@ def train(cfg: DictConfig) -> None:
     # NOTE: define callbacks for trainer
     cbs = [
         callbacks.RichProgressBar(),
-        callbacks.LearningRateMonitor("step", log_momentum=True),
-        callbacks.ModelCheckpoint(
-            dirpath=output_dir,
-            filename="{epoch:02d}-{val_llm_generate_bleu:.2f}",
-            monitor="val_llm_generate_bleu",
-            mode="max",
-            save_last=True,
-            save_weights_only=True,
-        ),
-        # DebugCallback(),
+        DebugCallback(),
     ]
-
-    # NOTE: set the logger
-    wdb_config = OmegaConf.to_container(cfg, resolve=True)
-    wdb_config["output_dir"] = output_dir
-    lt_logger = WandbLogger(
-        name=config_name,
-        project="sign-langauge-translation-llm",
-        config=wdb_config,
-    )
 
     # NOTE: start training
     t = Trainer(
         accelerator="gpu",
         strategy="ddp_find_unused_parameters_true",
-        devices=getattr(cfg, "devices", "auto"),
+        devices=[0, 1],
         callbacks=cbs,
         log_every_n_steps=50,
         max_epochs=cfg.max_epochs,
@@ -78,17 +61,10 @@ def train(cfg: DictConfig) -> None:
         gradient_clip_algorithm="value",
         sync_batchnorm=True,
         precision="16-mixed",
-        logger=lt_logger,
+        logger=None,
         # WARN: will slow down the training process, just for debug now
         # detect_anomaly=True,
     )
-
-    if t.is_global_zero:
-        # NOTE: save git info
-        save_git_info(
-            repo_path=project_root,
-            info_path=os.path.join(output_dir, "git_info"),
-        )
 
     logger.info(f"Process in local rank {t.local_rank}, global rank {t.global_rank}")
 
@@ -113,14 +89,29 @@ def train(cfg: DictConfig) -> None:
     for key in keys.unexpected_keys:
         logger.warning(f"Unexpected key {key} in the state dict")
 
-    # start train
     t.fit(model, datamodule=datamodule)
 
 
 class DebugCallback(callbacks.Callback):
-    def __init__(self):
-        super().__init__()
-        self.current_train_batch = None
+    @staticmethod
+    def check_nan_hook(module, input, output):
+        if isinstance(output, tuple):  # 有的模块输出是 tuple
+            output = output[0]
+        if not torch.isnan(output).any():
+            return
+        logging.warning(
+            f"NaN detected in module: {module.__class__.__name__} ({module})"
+        )
+
+    def on_train_start(
+        self, trainer: "pl.Trainer", pl_module: "pl.LightningModule"
+    ) -> None:
+        pass
+        # hooks = []
+        # for name, module in pl_module.named_modules():
+        #     hooks.append(module.register_forward_hook(self.check_nan_hook))
+        #
+        # return super().on_train_start(trainer, pl_module)
 
     def on_train_batch_start(
         self,
@@ -129,48 +120,55 @@ class DebugCallback(callbacks.Callback):
         batch: Any,
         batch_idx: int,
     ) -> None:
-        self.current_train_batch = batch
-
-    def on_before_backward(
-        self, trainer: "pl.Trainer", pl_module: "pl.LightningModule", loss: torch.Tensor
-    ) -> None:
-        # NOTE: check the loss
-        if torch.isnan(loss).any():
-            video = self.current_train_batch["video"]
-            ids = self.current_train_batch["ids"]
-
-            logger.warning(f"Loss is NaN: {loss}")
-            logger.warning(
-                f"Video shape: {video.shape}, mean: {video.mean()}, std: {video.std()}"
-            )
-            logger.warning(f"input_ids: {ids}")
-            # trainer.should_stop = True
+        # vdieo = batch["video"]
+        # logging.info(
+        #     f"Video shape: {vdieo.shape}, mean: {vdieo.mean()}, std: {vdieo.std()}"
+        # )
+        # val_steps = 0
+        return super().on_train_batch_start(trainer, pl_module, batch, batch_idx)
 
     def on_before_optimizer_step(
         self,
         trainer: "pl.Trainer",
         pl_module: "pl.LightningModule",
-        optimizer: any,
+        optimizer: Optimizer,
     ) -> None:
-        nan_flag = False
+        # NOTE: check the gradient norm
+        #
+        for name, param in pl_module.named_parameters():
+            if (
+                name
+                == "shared_encoder.embeddings.word_embeddings.new_embeddings.weight"
+            ):
+                logging.info({param.grad.mean()})
+
+            if param.grad is None:
+                continue
+
+            logging.info(f"Param {name} has  mean: {param.mean()}, std: {param.std()}")
+
+            if param.grad is not None:
+                logging.info(
+                    f"Param {name} has grad mean: {param.grad.mean()}, std: {param.grad.std()}"
+                )
+            else:
+                logging.info(f"Param {name} has no grad")
+
+        if trainer.global_step > 100:
+            trainer.should_stop = True
+
+        # NOTE: check nan
         for name, param in pl_module.named_parameters():
             global_step = trainer.global_step
 
             if torch.isnan(param).any():
-                nan_flag = True
                 logger.warning(
                     f"In Step {global_step}, Param {name} has mean: {param.mean()}, std: {param.std()}"
                 )
             if param.grad is not None and torch.isnan(param.grad).any():
-                nan_flag = True
                 logger.warning(
                     f"In Step {global_step}, Param {name} has grad mean: {param.grad.mean()}, std: {param.grad.std()}"
                 )
-        # if nan_flag and global_step >= 1000:
-        #     logger.warning(
-        #         "find nan and the global step is larger than 1000, stop the training"
-        #     )
-        #     trainer.should_stop = True
         return
 
 
