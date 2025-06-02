@@ -1,0 +1,39 @@
+defaults:
+  - base_train
+  # - override modules: sapiens_0.3b
+  # - override data: ph14t_512x384_wonorm
+  - _self_
+
+debug: False
+max_epochs: 400
+devices: [0]
+
+data:
+  batch_size: 2
+
+engine:
+  lr_scheduler:
+    step_size: 50
+  optmizer:
+    lr: 1e-4
+
+vtg_flag: False
+vtg_weight: 1.0
+vtg_mask_ratio: 0.0
+vtg_random_replace_prob: 0.5
+vtg_mask_replace_prob: 0.5
+
+vtm_flag: False
+vtm_mask_ratio: 0.8
+vtm_weight: 1.0
+vtm_random_replace_prob: 0.3
+vtm_mask_replace_prob: 0.6
+
+vtc_flag: False
+vtc_weight: 1.0
+vtc_queue_max_size: 4096
+
+pl_flag: True
+pl_weight: 1.0
+
+inference_mode: False

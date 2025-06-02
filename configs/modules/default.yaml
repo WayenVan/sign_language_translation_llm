@@ -17,8 +17,7 @@ num_query_token: 64
 connector:
   _target_: modules.LinearConnector
   in_features: 768
-  out_features: 1152 #gemma3 1b
+  out_features: 1024 #wmt19-en-de
   # out_features: 2560 #gemma3 1b
-#
 freezer:
   _target_: modules.FullFreezer

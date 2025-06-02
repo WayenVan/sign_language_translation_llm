@@ -8,7 +8,10 @@
     "**/.mypy_cache/**",
     "**/.pytest_cache/**",
     "dataset",
-    "outputs"
+    "outputs",
+    "sapeins_configs",
+    "lightning_logs",
+    "wandb",
   ],
   "include": [
     "scripts/**",

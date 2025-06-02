@@ -1,6 +1,7 @@
 from .base_handle import BaseHandle
 import torch
 from torchmetrics import Accuracy
+from torchmetrics.text import BLEUScore
 import torch.nn.functional as F
 from typing import List
 from einops import rearrange
@@ -22,19 +23,15 @@ class PLHandle(BaseHandle):
             num_classes=self.vocab_size,
             ignore_index=llm_padding_idx,  # padding index
         )
-
-        self.val_accu = Accuracy(
-            task="multiclass",
-            num_classes=self.vocab_size,
-            ignore_index=llm_padding_idx,  # padding index
-        )
+        self.bleu = BLEUScore(n_gram=1, smooth=True)
+        self.llm_padding_idx = llm_padding_idx
 
         # NOTE: freeze adapter, and shared encoder
-        for param in module.visual_adapter.parameters():
-            param.requires_grad = False
+        # for param in module.visual_adapter.parameters():
+        #     param.requires_grad = False
         # for param in module.shared_encoder.parameters():
         #     param.requires_grad = False
-        module.visual_adapter.eval()
+        # module.visual_adapter.eval()
         # module.shared_encoder.eval()
 
     def dispatch_batch(self, batch, device):
@@ -57,146 +54,140 @@ class PLHandle(BaseHandle):
         """
         Called at the end of the validation epoch.
         """
-        val_acc = self.val_accu.compute()
-        module.log("val_llm_generate_accu", val_acc, prog_bar=True, sync_dist=True)
-        self.val_accu.reset()
+        bleu = self.bleu.compute()
+        module.log("val_llm_generate_bleu", bleu, prog_bar=True, sync_dist=True)
+        self.bleu.reset()
 
     @staticmethod
     def tokenize(text: List[str], tokenizer, device):
         """
         Tokenize the text using the tokenizer.
         """
-        tokenizer.add_bos_token = True
-        tokenizer.add_eos_token = False
+        eos_token_id = tokenizer.encoder["</s>"]
+        bos_token_id = tokenizer.encoder["</s>"]
 
-        input_outputs = tokenizer(
-            text,
+        text_ids = [tokenizer.encode(t, add_special_tokens=False) for t in text]
+        input_ids = [[bos_token_id] + text_id for text_id in text_ids]
+        label_ids = [text_id + [eos_token_id] for text_id in text_ids]
+
+        input_outputs = tokenizer.pad(
+            {"input_ids": input_ids},
             padding=True,
             return_tensors="pt",
+            return_attention_mask=True,
         )
-
-        tokenizer.add_bos_token = False
-        tokenizer.add_eos_token = True
-
-        label_outputs = tokenizer(
-            text,
+        label_outputs = tokenizer.pad(
+            {"input_ids": label_ids},
             padding=True,
             return_tensors="pt",
+            return_attention_mask=True,
         )
-
-        assert torch.equal(
-            input_outputs["attention_mask"], label_outputs["attention_mask"]
-        ), "Attention mask should be the same for input and label"
 
         return (
             torch.LongTensor(input_outputs["input_ids"]).to(device),
             torch.LongTensor(label_outputs["input_ids"]).to(device),
-            torch.LongTensor(input_outputs["attention_mask"])
-            .sum(dim=1)
-            .to(device),  # (B), text length
+            torch.LongTensor(input_outputs["attention_mask"]).to(
+                device
+            ),  # (B), text length
         )
 
     @staticmethod
-    def generate_padding_attention_mask(
-        video_length, text_length, max_video_length=None, max_text_length=None
+    def length_to_mask(lengths, max_length=None):
+        """
+        Convert lengths to a boolean mask.
+        lengths: [B]
+        max_length: int, optional
+        """
+        if max_length is None:
+            max_length = lengths.max().item()
+        B = lengths.size(0)
+        mask = torch.arange(max_length, device=lengths.device).expand(
+            B, max_length
+        ) < lengths.unsqueeze(1)
+        return mask.long()  # (B, max_length)
+
+    def _forward_q_former(
+        self,
+        module,
+        visual_features,  # [b t c]
+        v_length,  # [b]
+        output_attentions=False,
     ):
-        """
-        Generate addtivie attention mask for the video and text sequences.
-        video_length: [B]
-        text_length: [B]
-        """
-        if max_video_length is None:
-            max_video_length = video_length.max().item()
-        if max_text_length is None:
-            max_text_length = text_length.max().item()
+        B, T, C = visual_features.shape
+        NUM_QUERIES = module.num_query_token
 
-        video_mask = torch.arange(max_video_length, device=video_length.device).expand(
-            video_length.size(0), max_video_length
-        ) < video_length.unsqueeze(1)
-        text_mask = torch.arange(max_text_length, device=text_length.device).expand(
-            text_length.size(0), max_text_length
-        ) < text_length.unsqueeze(1)
+        # video query
+        video_query_tokens = module.video_query_tokens.expand(B, -1, -1)
 
-        video_mask = video_mask.long()
-        text_mask = text_mask.long()
+        # create padding mask for the cross atttention with video
+        cross_attention_mask = self.length_to_mask(v_length, max_length=T)
 
-        padding_mask = torch.cat((video_mask, text_mask), dim=1)
-        # for heads dimension and query dimension # (B, L)
-
-        return padding_mask
-
-    def _forward(self, module, video, video_length, text_ids, text_length):
-        with torch.no_grad():
-            visual_encoder_outputs = module.visual_encoder(video, video_length)
-
-        hidden_state = visual_encoder_outputs.hidden_state
-        v_length = visual_encoder_outputs.video_length
-
-        with torch.no_grad():
-            # NOTE: video embedding shou
-            visual_embeddings = module.visual_adapter(hidden_state)  # b t c
-
-        visual_embeddings = module.shared_encoder(
-            inputs_embeds=visual_embeddings,
-            attention_mask=None,
-        ).last_hidden_state
-        visual_embeddings = module.connector(visual_embeddings)  # b t c
-
-        # NOTE: text embeddings
-        with torch.no_grad():
-            textaul_embeddings = module.llm.get_input_embeddings()(text_ids)  # b l c
-
-        B, T, C = visual_embeddings.shape
-        _, L, _ = textaul_embeddings.shape
-
-        assert T == v_length.max().item(), (
-            f"Visual length {T} does not match max video length {v_length.max().item()}"
+        # create dummy text ids
+        dummy_text_ids = (
+            torch.LongTensor([module.tokenizer.pad_token_id])
+            .to(module.device)
+            .expand(B, 1)
         )
-        assert L == text_length.max().item(), (
-            f"Text length {L} does not match max text length {text_length.max().item()}"
+        dummy_attention_mask = torch.ones(B, NUM_QUERIES + 1).to(module.device)
+        dummy_attention_mask[:, -1] = 0  # first token is padding
+
+        # q-former forward
+        bert_output = module.shared_encoder(
+            input_ids=dummy_text_ids,  # dummy input to avoid using text_ids
+            attention_mask=dummy_attention_mask,
+            query_embeds=video_query_tokens,
+            encoder_hidden_states=visual_features,
+            encoder_attention_mask=cross_attention_mask,
+            output_attentions=output_attentions,
+            output_hidden_states=True,
+        )
+        visual_features = bert_output.hidden_states[-1][:, :-1]
+        visual_features = module.connector(visual_features)
+
+        assert visual_features.shape[1] == NUM_QUERIES
+        return visual_features
+
+    def _forward_llm(self, module, visual_features, text_ids, text_attention_mask):
+        B, NUM_QUERIES, C = visual_features.shape
+
+        eos_token_id = module.llm_tokenizer.encoder["</s>"]
+        eos_token_embedding = module.llm.get_input_embeddings()(
+            torch.LongTensor([eos_token_id]).to(module.device)
         )
 
-        #
-        padding_attention_mask = self.generate_padding_attention_mask(
-            v_length, text_length
+        llm_encode_features = torch.cat(
+            [
+                visual_features,
+                eos_token_embedding.expand(B, 1, C),
+            ],
+            dim=1,  # [b, num_queries+1, C]
         )
-        features = torch.cat((visual_embeddings, textaul_embeddings), dim=1)  # b t+l c
 
-        out_features = module.llm(
-            inputs_embeds=features,
-            attention_mask=padding_attention_mask,
+        llm_outputs = module.llm(
+            inputs_embeds=llm_encode_features,
+            decoder_input_ids=text_ids,
+            decoder_attention_mask=text_attention_mask,
+            use_cache=False,
         )
-        out_logit = out_features.logits[:, T:, : self.vocab_size]  # b l c
-        return out_logit
+        return llm_outputs.logits
 
-    def train_step(self, module, batch, batch_idx):
-        ids, video, video_length, text = self.dispatch_batch(batch, module.device)
-        text_ids, labels, text_length = self.tokenize(
+    def train_step(self, module, batch, batch_idx, visual_embeddings, v_length):
+        ids, _, _, text = self.dispatch_batch(batch, module.device)
+        text_ids, labels, text_mask = self.tokenize(
             text, module.llm_tokenizer, module.device
         )
-
-        # Validate lengths
-        if (video_length == 0).any() or (text_length == 0).any():
-            raise ValueError("Zero-length sequences detected in batch")
-
-        # Validate labels
-        if (labels >= self.vocab_size).any():
-            raise ValueError(f"Label values exceed vocab size {self.vocab_size}")
-
-        out_logit = self._forward(module, video, video_length, text_ids, text_length)
+        visual_features = self._forward_q_former(module, visual_embeddings, v_length)
+        out_logit = self._forward_llm(module, visual_features, text_ids, text_mask)
 
         # Add numerical stability
         out_loglogit = F.log_softmax(out_logit, dim=-1)
-
-        if torch.isnan(out_loglogit).any():
-            raise ValueError("NaN detected in log probabilities")
 
         self.train_accu.update(
             rearrange(out_loglogit, "b l c -> (b l) c"),
             rearrange(labels, "b l -> (b l)"),
         )
 
-        loss = (
+        target_loss = (
             F.nll_loss(
                 rearrange(out_loglogit, "b l c -> (b l) c"),
                 rearrange(labels, "b l -> (b l)"),
@@ -204,27 +195,46 @@ class PLHandle(BaseHandle):
             )
             * self.loss_weight
         )
+        module.log("train_llm_generate_loss", target_loss, prog_bar=True)
+        return target_loss
 
-        if torch.isnan(loss):
-            raise ValueError("NaN loss detected")
+    def validation_step(self, module, batch, batch_idx, visual_embeddings, v_length):
+        ids, _, _, text = self.dispatch_batch(batch, module.device)
 
-        module.log("train_llm_generate_loss", loss, prog_bar=True)
-        return loss
-
-    def validation_step(self, module, batch, batch_idx):
-        ids, video, video_length, text = self.dispatch_batch(batch, module.device)
-
-        text_ids, labels, text_length = self.tokenize(
-            text, module.llm_tokenizer, module.device
+        text_ids, labels, text_mask = self.tokenize(
+            text,
+            module.llm_tokenizer,
+            module.device,
         )
 
-        out_logit = self._forward(module, video, video_length, text_ids, text_length)
+        visual_features = self._forward_q_former(module, visual_embeddings, v_length)
 
-        self.val_accu.update(
-            rearrange(out_logit, "b l c -> (b l) c"),
-            rearrange(labels, "b l -> (b l)"),
+        B, NUM_QUERIES, C = visual_features.shape
+
+        eos_token_id = module.llm_tokenizer.encoder["</s>"]
+        eos_token_embedding = module.llm.get_input_embeddings()(
+            torch.LongTensor([eos_token_id]).to(module.device)
         )
 
-    def train_handle(self, module, is_train):
-        module.visual_adapter.eval()
-        # module.shared_encoder.eval()
+        llm_encode_features = torch.cat(
+            [
+                visual_features,
+                eos_token_embedding.expand(B, 1, C),
+            ],
+            dim=1,  # [b, num_queries+1, C]
+        )
+        with torch.no_grad():
+            # NOTE: max length in dev set is 50
+            outputs = module.llm.generate(
+                inputs_embeds=llm_encode_features,
+                max_length=50,
+            )
+
+        for b in range(B):
+            predicted = module.llm_tokenizer.decode(
+                outputs[b], skip_special_tokens=True
+            )
+            self.bleu.update(
+                [predicted],
+                [[text[b]]],
+            )

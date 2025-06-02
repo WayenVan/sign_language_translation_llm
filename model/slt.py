@@ -10,7 +10,9 @@ from einops import rearrange
 from collections import OrderedDict
 import numpy as np
 
-from transformers.models.gemma3 import Gemma3ForCausalLM, Gemma3ForConditionalGeneration
+
+from modules.fsmt.modeling_fsmt import FSMTForConditionalGeneration
+from transformers import FSMTTokenizer
 from modules.extended_embeddings import CustomEmbeddingLayer
 from modules.q_former.q_former import (
     BertLMHeadModel,
@@ -57,26 +59,24 @@ class SLTModel(LightningModule):
         self.freezer.freeze()
 
     def _create_llm(self):
-        self.connector = instantiate(self.cfg.modules.connector)
         if self.cfg.inference_mode or self.pl_flag:
-            self.llm = Gemma3ForCausalLM.from_pretrained(
-                "google/gemma-3-1b-it",
-                device_map="cpu",
-                torch_dtype=torch.float32,
+            self.connector = instantiate(self.cfg.modules.connector)
+
+            mname = "WayenVan/wmt19-en-de"
+            self.llm = FSMTForConditionalGeneration.from_pretrained(
+                mname, device_map="cpu", torch_dtype=torch.float32
             )
-            self.llm_tokenizer = AutoTokenizer.from_pretrained(
-                "google/gemma-3-1b-it",
-                use_fast=True,
-            )
-            self.llm_tokenizer.padding_side = "right"
+            self.llm_tokenizer = FSMTTokenizer.from_pretrained(mname)
 
             # NOTE: freezed llm
             for paras in self.llm.parameters():
                 paras.requires_grad = False
+            self.llm.eval()
 
         else:
             self.llm = None
             self.llm_tokenizer = None
+            self.connector = None
 
     def _create_handles(self):
         self.handles = nn.ModuleDict()
@@ -103,7 +103,7 @@ class SLTModel(LightningModule):
                 self,
                 self.llm_tokenizer.vocab_size,
                 self.cfg.pl_weight,
-                self.llm_tokenizer.pad_token_type_id,
+                self.llm_tokenizer.encoder["<pad>"],
             )
 
     def _create_visual_layers(self):
@@ -247,9 +247,6 @@ class SLTModel(LightningModule):
         # NOTE: delegate the train to the freezer
         self.freezer.train(is_train)
 
-    def forward(self, is_train):
-        pass
-
     def configure_optimizers(self):
         opt: Optimizer = instantiate(
             self.cfg.engine.optimizer,
@@ -263,8 +260,6 @@ class SLTModel(LightningModule):
     def on_save_checkpoint(self, checkpoint: Dict[str, Any]) -> None:
         for name in list(checkpoint.keys()):
             if name.startswith("llm"):
-                del checkpoint[name]
-            if name.startswith("visual_encoder"):
                 del checkpoint[name]
         return checkpoint
 

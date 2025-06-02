@@ -48,8 +48,8 @@ def train(cfg: DictConfig) -> None:
         callbacks.LearningRateMonitor("step", log_momentum=True),
         callbacks.ModelCheckpoint(
             dirpath=output_dir,
-            filename="epoch={epoch:02d}-wer={val_llm_generate_accu:.2f}",
-            monitor="val_llm_generate_accu",
+            filename="{epoch:02d}-{val_llm_generate_bleu:.2f}",
+            monitor="val_llm_generate_bleu",
             mode="max",
             save_last=True,
             save_weights_only=True,

@@ -32,7 +32,7 @@ for name, param in model.named_parameters():
 # input_image = Image.open("/root/shared-data/Radar_Yao/outputs/video/video_20.png")
 input_image = Image.open("outputs/visualization_val/110.jpg")
 input_image = input_image.convert("RGB")
-input_image = F.resize(input_image, (512, 384), antialias=True)
+input_image = F.resize(input_image, (256, 192), antialias=True)
 
 input_tensor = F.to_tensor(input_image) * 255.0
 input_tensor = F.normalize(
