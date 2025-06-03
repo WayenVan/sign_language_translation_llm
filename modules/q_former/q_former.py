@@ -885,7 +885,7 @@ class BertModel(BertPreTrainedModel):
         if is_decoder:
             extended_attention_mask = self.get_extended_attention_mask(
                 attention_mask,
-                input_ids.shape,
+                input_ids.shape if input_ids is not None else None,
                 device,
                 is_decoder,
                 has_query=(query_embeds is not None),

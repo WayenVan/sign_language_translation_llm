@@ -55,17 +55,18 @@ def train(cfg: DictConfig) -> None:
     t = Trainer(
         accelerator="gpu",
         strategy="ddp_find_unused_parameters_true",
-        devices=[0, 1],
+        devices=[0],
         callbacks=cbs,
         log_every_n_steps=50,
         max_epochs=cfg.max_epochs,
         gradient_clip_val=1.0,  # NOTE: gradient clipping will be normed
-        gradient_clip_algorithm="value",
+        # gradient_clip_algorithm="value",
         sync_batchnorm=True,
         precision="16-mixed",
         logger=None,
         # WARN: will slow down the training process, just for debug now
         # detect_anomaly=True,
+        num_sanity_val_steps=0,  # NOTE: disable sanity check
     )
 
     logger.info(f"Process in local rank {t.local_rank}, global rank {t.global_rank}")

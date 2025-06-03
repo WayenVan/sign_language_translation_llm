@@ -131,20 +131,19 @@ class PLHandle(BaseHandle):
             .to(module.device)
             .expand(B, 1)
         )
-        dummy_attention_mask = torch.ones(B, NUM_QUERIES + 1).to(module.device).long()
-        dummy_attention_mask[:, -1] = 0  # first token is padding
 
         # q-former forward
         bert_output = module.shared_encoder(
-            input_ids=dummy_text_ids,  # dummy input to avoid using text_ids
-            attention_mask=dummy_attention_mask,
+            attention_mask=torch.ones(B, NUM_QUERIES, NUM_QUERIES)
+            .to(module.device)
+            .long(),
             query_embeds=video_query_tokens,
             encoder_hidden_states=visual_features,
             encoder_attention_mask=cross_attention_mask,
             output_attentions=output_attentions,
             output_hidden_states=True,
         )
-        visual_features = bert_output.hidden_states[-1][:, :-1]
+        visual_features = bert_output.hidden_states[-1]
         visual_features = module.connector(visual_features)
 
         assert visual_features.shape[1] == NUM_QUERIES
