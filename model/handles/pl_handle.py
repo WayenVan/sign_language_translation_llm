@@ -66,8 +66,8 @@ class PLHandle(BaseHandle):
         """
         Tokenize the text using the tokenizer.
         """
-        eos_token_id = tokenizer.encoder["</s>"]
-        bos_token_id = tokenizer.encoder["</s>"]
+        eos_token_id = tokenizer.added_tokens_encoder["</s>"]
+        bos_token_id = tokenizer.added_tokens_encoder["<pad>"]
 
         text_ids = [tokenizer.encode(t, add_special_tokens=False) for t in text]
         input_ids = [[bos_token_id] + text_id for text_id in text_ids]
@@ -150,21 +150,36 @@ class PLHandle(BaseHandle):
         assert visual_features.shape[1] == NUM_QUERIES
         return visual_features
 
-    def _forward_llm(self, module, visual_features, text_ids, text_attention_mask):
+    def _prepare_llm_encode_input(self, module, visual_features):
+        """
+        Prepare the input for the LLM encoder.
+        visual_features: [B, NUM_QUERIES, C]
+        """
         B, NUM_QUERIES, C = visual_features.shape
 
-        eos_token_id = module.llm_tokenizer.encoder["</s>"]
+        eos_token_id = module.llm_tokenizer.added_tokens_encoder["</s>"]
         eos_token_embedding = module.llm.get_input_embeddings()(
-            torch.LongTensor([eos_token_id]).to(module.device)
+            torch.LongTensor([[eos_token_id]]).to(module.device)  # [1, 1]
         )
+
+        prompt = "translate to german: "
+        prompt_ids = module.llm_tokenizer.encode(
+            prompt, add_special_tokens=False, return_tensors="pt"
+        ).to(module.device)  # [1, L]
+        prompt_embedding = module.llm.get_input_embeddings()(prompt_ids)  # [1, L, C]
 
         llm_encode_features = torch.cat(
             [
+                prompt_embedding.expand(B, -1, C),  # [B, L, C]
                 visual_features,
                 eos_token_embedding.expand(B, 1, C),
             ],
-            dim=1,  # [b, num_queries+1, C]
+            dim=1,  # [b, prompt_length+num_queries+1, C]
         )
+        return llm_encode_features
+
+    def _forward_llm(self, module, visual_features, text_ids, text_attention_mask):
+        llm_encode_features = self._prepare_llm_encode_input(module, visual_features)
 
         llm_outputs = module.llm(
             inputs_embeds=llm_encode_features,
@@ -187,11 +202,14 @@ class PLHandle(BaseHandle):
                 f"NaN detected, ids: {ids}, text: {text}, visual_features:{visual_features.mean()}, out_logit:{out_logit.mean()}"
             )
 
-        # Add numerical stability
         out_loglogit = F.log_softmax(out_logit, dim=-1)
 
+        with torch.no_grad():
+            # clip the last logits to calculate the accuracyk
+            reduced_logits = out_logit[..., : self.vocab_size]
+
         self.train_accu.update(
-            rearrange(out_loglogit, "b l c -> (b l) c"),
+            rearrange(reduced_logits, "b l c -> (b l) c"),
             rearrange(labels, "b l -> (b l)"),
         )
 
@@ -209,28 +227,12 @@ class PLHandle(BaseHandle):
     def validation_step(self, module, batch, batch_idx, visual_embeddings, v_length):
         ids, _, _, text = self.dispatch_batch(batch, module.device)
 
-        text_ids, labels, text_mask = self.tokenize(
-            text,
-            module.llm_tokenizer,
-            module.device,
-        )
+        B = len(ids)
 
         visual_features = self._forward_q_former(module, visual_embeddings, v_length)
 
-        B, NUM_QUERIES, C = visual_features.shape
+        llm_encode_features = self._prepare_llm_encode_input(module, visual_features)
 
-        eos_token_id = module.llm_tokenizer.encoder["</s>"]
-        eos_token_embedding = module.llm.get_input_embeddings()(
-            torch.LongTensor([eos_token_id]).to(module.device)
-        )
-
-        llm_encode_features = torch.cat(
-            [
-                visual_features,
-                eos_token_embedding.expand(B, 1, C),
-            ],
-            dim=1,  # [b, num_queries+1, C]
-        )
         with torch.no_grad():
             # NOTE: max length in dev set is 50
             outputs = module.llm.generate(

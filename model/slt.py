@@ -9,10 +9,11 @@ from typing import Optional, List
 from einops import rearrange
 from collections import OrderedDict
 import numpy as np
+from transformers.models.t5 import T5Tokenizer, T5ForConditionalGeneration
 
 
-from modules.fsmt.modeling_fsmt import FSMTForConditionalGeneration
-from transformers import FSMTTokenizer
+# from modules.fsmt.modeling_fsmt import FSMTForConditionalGeneration
+# from transformers import FSMTTokenizer
 from modules.extended_embeddings import CustomEmbeddingLayer
 from modules.q_former.q_former import (
     BertLMHeadModel,
@@ -62,11 +63,16 @@ class SLTModel(LightningModule):
         if self.cfg.inference_mode or self.pl_flag:
             self.connector = instantiate(self.cfg.modules.connector)
 
-            mname = "WayenVan/wmt19-en-de"
-            self.llm = FSMTForConditionalGeneration.from_pretrained(
+            # mname = "WayenVan/wmt19-en-de"
+            # self.llm = FSMTForConditionalGeneration.from_pretrained(
+            #     mname, device_map="cpu", torch_dtype=torch.float32
+            # )
+            # self.llm_tokenizer = FSMTTokenizer.from_pretrained(mname)
+            mname = "google/flan-t5-large"
+            self.llm = T5ForConditionalGeneration.from_pretrained(
                 mname, device_map="cpu", torch_dtype=torch.float32
             )
-            self.llm_tokenizer = FSMTTokenizer.from_pretrained(mname)
+            self.llm_tokenizer = T5Tokenizer.from_pretrained(mname)
 
             # NOTE: freezed llm
             for paras in self.llm.parameters():
@@ -101,9 +107,9 @@ class SLTModel(LightningModule):
         if self.pl_flag:
             self.handles["pl"] = PLHandle(
                 self,
-                self.llm_tokenizer.vocab_size,
+                len(self.llm_tokenizer),
                 self.cfg.pl_weight,
-                self.llm_tokenizer.encoder["<pad>"],
+                self.llm_tokenizer.added_tokens_encoder["<pad>"],
             )
 
     def _create_visual_layers(self):

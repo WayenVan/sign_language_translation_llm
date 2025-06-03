@@ -1,6 +1,6 @@
 defaults:
   - base_train
-  # - override modules: sapiens_0.3b
+  - override modules: vitpose_base
   # - override data: ph14t_512x384_wonorm
   - _self_
 
@@ -10,6 +10,8 @@ devices: [0]
 
 data:
   batch_size: 2
+  datamodule:
+    num_workers: 12
 
 engine:
   lr_scheduler:
@@ -29,9 +31,8 @@ vtm_weight: 1.0
 vtm_random_replace_prob: 0.3
 vtm_mask_replace_prob: 0.6
 
-vtc_flag: False
+vtc_flag: True
 vtc_weight: 1.0
-vtc_queue_max_size: 4096
 
 prompt_learning: False
 inference_mode: False

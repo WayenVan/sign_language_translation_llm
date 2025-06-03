@@ -18,7 +18,7 @@ tokenizer = AutoTokenizer.from_pretrained("google/gemma-3-1b-it")
 index = Ph14TIndex("dataset/PHOENIX-2014-T-release-v3")
 
 model = Gemma3ForCausalLM.from_pretrained(
-    "google/gemma-3-4b-it",
+    "google/gemma-3-1b-it",
     device_map="cuda:0",
     torch_dtype=torch.float16,
 ).eval()
