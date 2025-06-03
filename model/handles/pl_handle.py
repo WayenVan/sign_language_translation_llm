@@ -131,7 +131,7 @@ class PLHandle(BaseHandle):
             .to(module.device)
             .expand(B, 1)
         )
-        dummy_attention_mask = torch.ones(B, NUM_QUERIES + 1).to(module.device)
+        dummy_attention_mask = torch.ones(B, NUM_QUERIES + 1).to(module.device).long()
         dummy_attention_mask[:, -1] = 0  # first token is padding
 
         # q-former forward
