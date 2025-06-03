@@ -75,12 +75,22 @@ class SLTModel(LightningModule):
             #     mname, device_map="cpu", torch_dtype=torch.float32
             # )
             # self.llm_tokenizer = T5Tokenizer.from_pretrained(mname)
-            mname = "google/gemma-3-1b-it"
+            mname = "google/gemma-3-4b-it"
             self.llm = Gemma3ForCausalLM.from_pretrained(
-                mname, device_map="cpu", torch_dtype=torch.float32
+                mname, device_map="cpu", torch_dtype=torch.bfloat16
             )
             self.llm_tokenizer = GemmaTokenizerFast.from_pretrained(mname)
+            self.llm_config = AutoConfig.from_pretrained(mname)
             self.llm_tokenizer.padding_side = "right"
+            self.llm_hidden_size = self.llm_config.text_config.hidden_size
+
+            # add sepcial tokens, begain of video, start of translation
+            self.llm_bov_token = nn.Parameter(
+                torch.randn(1, 1, self.llm_hidden_size), requires_grad=True
+            )
+            self.llm_sot_token = nn.Parameter(
+                torch.randn(1, 1, self.llm_hidden_size), requires_grad=True
+            )
 
             # NOTE: freezed llm
             for paras in self.llm.parameters():

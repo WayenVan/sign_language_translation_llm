@@ -17,7 +17,7 @@ num_query_token: 64
 connector:
   _target_: modules.LinearConnector
   in_features: 768
-  out_features: 1024 #fsmt
+  out_features: 2560
 
 freezer:
   _target_: modules.FullFreezer
