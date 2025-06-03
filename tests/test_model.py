@@ -28,7 +28,7 @@ def test_slt_model():
     import polars as pl
 
     initialize(config_path="../configs")
-    cfg = compose("prompt_learning_l40s")
+    cfg = compose("prompt_learning")
     cfg.data.batch_size = 2
     data_module = Ph14TDataModule(cfg)
     data_module.setup()
@@ -37,8 +37,8 @@ def test_slt_model():
     ).cuda()
     loader = data_module.train_dataloader()
     for i, batch in enumerate(loader):
-        model.training_step(batch, 0)
-        # model.validation_step(batch, 0)
+        # model.training_step(batch, 0)
+        model.validation_step(batch, 0)
         print("ok")
 
 

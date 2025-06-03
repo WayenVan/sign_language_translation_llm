@@ -9,8 +9,8 @@ from transformers.models.gemma3 import Gemma3ForCausalLM
 from transformers.models.gemma.tokenization_gemma_fast import GemmaTokenizerFast
 from huggingface_hub import login
 
-token = os.environ.get("HUGGINGFACE_HUB_TOKEN")
-login(token)
+# token = os.environ.get("HUGGINGFACE_HUB_TOKEN")
+# login(token)
 
 
 tokenizer = AutoTokenizer.from_pretrained("google/gemma-3-1b-it")

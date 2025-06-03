@@ -10,6 +10,8 @@ from einops import rearrange
 from collections import OrderedDict
 import numpy as np
 from transformers.models.t5 import T5Tokenizer, T5ForConditionalGeneration
+from transformers.models.gemma3 import Gemma3ForConditionalGeneration, Gemma3ForCausalLM
+from transformers.models.gemma.tokenization_gemma_fast import GemmaTokenizerFast
 
 
 # from modules.fsmt.modeling_fsmt import FSMTForConditionalGeneration
@@ -68,11 +70,17 @@ class SLTModel(LightningModule):
             #     mname, device_map="cpu", torch_dtype=torch.float32
             # )
             # self.llm_tokenizer = FSMTTokenizer.from_pretrained(mname)
-            mname = "google/flan-t5-large"
-            self.llm = T5ForConditionalGeneration.from_pretrained(
+            # mname = "google/flan-t5-large"
+            # self.llm = T5ForConditionalGeneration.from_pretrained(
+            #     mname, device_map="cpu", torch_dtype=torch.float32
+            # )
+            # self.llm_tokenizer = T5Tokenizer.from_pretrained(mname)
+            mname = "google/gemma-3-1b-it"
+            self.llm = Gemma3ForCausalLM.from_pretrained(
                 mname, device_map="cpu", torch_dtype=torch.float32
             )
-            self.llm_tokenizer = T5Tokenizer.from_pretrained(mname)
+            self.llm_tokenizer = GemmaTokenizerFast.from_pretrained(mname)
+            self.llm_tokenizer.padding_side = "right"
 
             # NOTE: freezed llm
             for paras in self.llm.parameters():
@@ -107,9 +115,10 @@ class SLTModel(LightningModule):
         if self.pl_flag:
             self.handles["pl"] = PLHandle(
                 self,
-                len(self.llm_tokenizer),
+                # len(self.llm_tokenizer),
+                self.llm_tokenizer.vocab_size,
                 self.cfg.pl_weight,
-                self.llm_tokenizer.added_tokens_encoder["<pad>"],
+                self.llm_tokenizer.pad_token_id,
             )
 
     def _create_visual_layers(self):

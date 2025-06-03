@@ -25,6 +25,7 @@ class PLHandle(BaseHandle):
             task="multiclass",
             num_classes=self.vocab_size,
             # ignore_index=llm_padding_idx,  # padding index
+            ignore_index=-100,
         )
         self.bleu = BLEUScore(n_gram=1, smooth=True)
         self.llm_padding_idx = llm_padding_idx
@@ -66,25 +67,32 @@ class PLHandle(BaseHandle):
         """
         Tokenize the text using the tokenizer.
         """
-        eos_token_id = tokenizer.added_tokens_encoder["</s>"]
-        bos_token_id = tokenizer.added_tokens_encoder["<pad>"]
+        tokenizer.add_bos_token = True
+        tokenizer.add_eos_token = False
 
-        text_ids = [tokenizer.encode(t, add_special_tokens=False) for t in text]
-        input_ids = [[bos_token_id] + text_id for text_id in text_ids]
-        label_ids = [text_id + [eos_token_id] for text_id in text_ids]
-
-        input_outputs = tokenizer.pad(
-            {"input_ids": input_ids},
+        input_outputs = tokenizer(
+            text,
             padding=True,
             return_tensors="pt",
-            return_attention_mask=True,
         )
-        label_outputs = tokenizer.pad(
-            {"input_ids": label_ids},
+
+        tokenizer.add_bos_token = False
+        tokenizer.add_eos_token = True
+
+        label_outputs = tokenizer(
+            text,
             padding=True,
             return_tensors="pt",
-            return_attention_mask=True,
         )
+
+        label_outputs["input_ids"] = label_outputs["input_ids"].masked_fill(
+            label_outputs["input_ids"] == tokenizer.pad_token_id,
+            -100,
+        )
+
+        assert torch.equal(
+            input_outputs["attention_mask"], label_outputs["attention_mask"]
+        ), "Attention mask should be the same for input and label"
 
         return (
             torch.LongTensor(input_outputs["input_ids"]).to(device),
@@ -144,17 +152,12 @@ class PLHandle(BaseHandle):
         assert visual_features.shape[1] == NUM_QUERIES
         return visual_features
 
-    def _prepare_llm_encode_input(self, module, visual_features):
+    def _prepare_llm_prompt(self, module, visual_features):
         """
         Prepare the input for the LLM encoder.
         visual_features: [B, NUM_QUERIES, C]
         """
         B, NUM_QUERIES, C = visual_features.shape
-
-        eos_token_id = module.llm_tokenizer.added_tokens_encoder["</s>"]
-        eos_token_embedding = module.llm.get_input_embeddings()(
-            torch.LongTensor([[eos_token_id]]).to(module.device)  # [1, 1]
-        )
 
         prompt = "translate to german: "
         prompt_ids = module.llm_tokenizer.encode(
@@ -162,27 +165,47 @@ class PLHandle(BaseHandle):
         ).to(module.device)  # [1, L]
         prompt_embedding = module.llm.get_input_embeddings()(prompt_ids)  # [1, L, C]
 
-        llm_encode_features = torch.cat(
+        llm_prompt = torch.cat(
             [
                 prompt_embedding.expand(B, -1, C),  # [B, L, C]
                 visual_features,
-                eos_token_embedding.expand(B, 1, C),
             ],
-            dim=1,  # [b, prompt_length+num_queries+1, C]
+            dim=1,  # [b, prompt_length+num_queries, C]
         )
-        return llm_encode_features
+        return llm_prompt
 
     def _forward_llm(
         self, module, visual_features, text_ids, text_attention_mask, labels=None
     ):
-        llm_encode_features = self._prepare_llm_encode_input(module, visual_features)
+        B, _, _ = visual_features.shape
+
+        llm_prompt = self._prepare_llm_prompt(module, visual_features)
+        # [B, prompt_length+num_queries, C]
+
+        text_embedding = module.llm.get_input_embeddings()(text_ids)  # [B, L, C]
+
+        _, TEXT_LENGTH, _ = text_embedding.shape
+
+        attention_mask = torch.cat(
+            [
+                torch.ones(B, llm_prompt.shape[1], device=llm_prompt.device),
+                text_attention_mask,
+            ],
+            dim=1,
+        )
 
         llm_outputs = module.llm(
-            inputs_embeds=llm_encode_features,
-            decoder_input_ids=text_ids,
-            decoder_attention_mask=text_attention_mask,
+            inputs_embeds=torch.cat(
+                [
+                    llm_prompt,  # [B, prompt_length+num_queries, C]
+                    text_embedding,  # [B, L, C]
+                ],
+                dim=1,  # [B, prompt_length+num_queries+L, C]
+            ),
+            attention_mask=attention_mask,  # [B, prompt_length+num_queries+L]
             labels=labels,
             use_cache=False,
+            logits_to_keep=TEXT_LENGTH,
         )
         return llm_outputs
 
@@ -213,14 +236,6 @@ class PLHandle(BaseHandle):
             rearrange(labels, "b l -> (b l)"),
         )
 
-        # target_loss = (
-        #     F.nll_loss(
-        #         rearrange(out_loglogit, "b l c -> (b l) c"),
-        #         rearrange(labels, "b l -> (b l)"),
-        #         ignore_index=0,
-        #     )
-        #     * self.loss_weight
-        # )
         target_loss = llm_output.loss * self.loss_weight
         module.log("train_llm_generate_loss", target_loss, prog_bar=True)
         return target_loss
@@ -232,13 +247,16 @@ class PLHandle(BaseHandle):
 
         visual_features = self._forward_q_former(module, visual_embeddings, v_length)
 
-        llm_encode_features = self._prepare_llm_encode_input(module, visual_features)
+        prompt = self._prepare_llm_prompt(module, visual_features)
+
+        _, PROMPT_LENGTH, _ = prompt.shape
 
         with torch.no_grad():
             # NOTE: max length in dev set is 50
             outputs = module.llm.generate(
-                inputs_embeds=llm_encode_features,
-                max_length=50,
+                inputs_embeds=prompt,
+                max_length=50 + PROMPT_LENGTH,  # add the prompt length
+                do_sample=False,
             )
 
         for b in range(B):
