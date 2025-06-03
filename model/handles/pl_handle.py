@@ -125,16 +125,11 @@ class PLHandle(BaseHandle):
         # create padding mask for the cross atttention with video
         cross_attention_mask = self.length_to_mask(v_length, max_length=T)
 
-        # create dummy text ids
-        dummy_text_ids = (
-            torch.LongTensor([module.tokenizer.pad_token_id])
-            .to(module.device)
-            .expand(B, 1)
-        )
-
         # q-former forward
         bert_output = module.shared_encoder(
-            attention_mask=torch.ones(B, NUM_QUERIES, NUM_QUERIES)
+            attention_mask=torch.ones(
+                B, NUM_QUERIES, NUM_QUERIES
+            )  # WARN: need to pass the attentiom mask to avoid q_former ask shape of input_ids
             .to(module.device)
             .long(),
             query_embeds=video_query_tokens,

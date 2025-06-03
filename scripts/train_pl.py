@@ -75,9 +75,9 @@ def train(cfg: DictConfig) -> None:
         log_every_n_steps=50,
         max_epochs=cfg.max_epochs,
         gradient_clip_val=1.0,  # NOTE: gradient clipping will be normed
-        gradient_clip_algorithm="value",
+        # gradient_clip_algorithm="value",
         sync_batchnorm=True,
-        precision="16-mixed",
+        precision="bf16-mixed",  # WARN: only bf16 is supported
         logger=lt_logger,
         # WARN: will slow down the training process, just for debug now
         # detect_anomaly=True,

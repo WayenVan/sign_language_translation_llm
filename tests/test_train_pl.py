@@ -62,7 +62,7 @@ def train(cfg: DictConfig) -> None:
         gradient_clip_val=1.0,  # NOTE: gradient clipping will be normed
         # gradient_clip_algorithm="value",
         sync_batchnorm=True,
-        precision="16-mixed",
+        precision="bf16-mixed",
         logger=None,
         # WARN: will slow down the training process, just for debug now
         # detect_anomaly=True,
