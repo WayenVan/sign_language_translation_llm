@@ -24,7 +24,7 @@ class PLHandle(BaseHandle):
         self.train_accu = Accuracy(
             task="multiclass",
             num_classes=self.vocab_size,
-            # ignore_index=llm_padding_idx,  # padding index
+            ignore_index=-100,
         )
         self.bleu = BLEUScore(n_gram=1, smooth=True)
         self.llm_padding_idx = llm_padding_idx
@@ -84,6 +84,10 @@ class PLHandle(BaseHandle):
             padding=True,
             return_tensors="pt",
             return_attention_mask=True,
+        )
+
+        label_outputs["input_ids"] = label_outputs["input_ids"].masked_fill(
+            label_outputs["input_ids"] == tokenizer.pad_token_id, -100
         )
 
         return (
