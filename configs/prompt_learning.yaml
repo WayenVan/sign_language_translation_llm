@@ -13,7 +13,7 @@ engine:
   lr_scheduler:
     step_size: 50
   optimizer:
-    lr: 1e-1
+    lr: 1e-8
 
 vtg_flag: False
 vtg_weight: 1.0

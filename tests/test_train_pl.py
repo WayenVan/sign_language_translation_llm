@@ -49,7 +49,7 @@ def train(cfg: DictConfig) -> None:
         DebugCallback(),
     ]
 
-    cfg.data.datamodule.num_workers = 2
+    cfg.data.datamodule.num_workers = 1
 
     # NOTE: start training
     t = Trainer(
@@ -139,12 +139,21 @@ class DebugCallback(callbacks.Callback):
         # NOTE: check the gradient norm
         #
         for name, param in pl_module.named_parameters():
+            if param.grad is None:
+                continue
+
+            logging.info(
+                f"Param: Param {name} has  mean: {param.mean()}, std: {param.std()}"
+            )
+
             if param.grad is not None:
-                abs_grad = param.grad.abs().max()
-                if abs_grad > 1000:
-                    logging.warning(
-                        f"Large gradient detected in {name}: {abs_grad.item()}"
-                    )
+                logging.info(
+                    f"Grade: Param {name} has grad mean: {param.grad.mean()}, std: {param.grad.std()}"
+                )
+            else:
+                logging.info(f"Param {name} has no grad")
+        if trainer.global_step > 100:
+            trainer.should_stop = True
 
         return
 

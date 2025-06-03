@@ -24,7 +24,7 @@ class PLHandle(BaseHandle):
         self.train_accu = Accuracy(
             task="multiclass",
             num_classes=self.vocab_size,
-            ignore_index=llm_padding_idx,  # padding index
+            # ignore_index=llm_padding_idx,  # padding index
         )
         self.bleu = BLEUScore(n_gram=1, smooth=True)
         self.llm_padding_idx = llm_padding_idx
@@ -172,16 +172,19 @@ class PLHandle(BaseHandle):
         )
         return llm_encode_features
 
-    def _forward_llm(self, module, visual_features, text_ids, text_attention_mask):
+    def _forward_llm(
+        self, module, visual_features, text_ids, text_attention_mask, labels=None
+    ):
         llm_encode_features = self._prepare_llm_encode_input(module, visual_features)
 
         llm_outputs = module.llm(
             inputs_embeds=llm_encode_features,
             decoder_input_ids=text_ids,
             decoder_attention_mask=text_attention_mask,
+            labels=labels,
             use_cache=False,
         )
-        return llm_outputs.logits
+        return llm_outputs
 
     def train_step(self, module, batch, batch_idx, visual_embeddings, v_length):
         ids, _, _, text = self.dispatch_batch(batch, module.device)
@@ -189,15 +192,18 @@ class PLHandle(BaseHandle):
             text, module.llm_tokenizer, module.device
         )
         visual_features = self._forward_q_former(module, visual_embeddings, v_length)
-        out_logit = self._forward_llm(module, visual_features, text_ids, text_mask)
+        llm_output = self._forward_llm(
+            module, visual_features, text_ids, text_mask, labels
+        )
+        out_logit = llm_output.logits  # [B, L, C]
 
         if out_logit.isnan().any():
             logger.warning(
                 f"NaN detected, ids: {ids}, text: {text}, visual_features:{visual_features.mean()}, out_logit:{out_logit.mean()}"
             )
 
-        out_loglogit = F.log_softmax(out_logit, dim=-1)
-
+        # out_loglogit = F.log_softmax(out_logit, dim=-1)
+        #
         with torch.no_grad():
             # clip the last logits to calculate the accuracyk
             reduced_logits = out_logit[..., : self.vocab_size]
@@ -207,14 +213,15 @@ class PLHandle(BaseHandle):
             rearrange(labels, "b l -> (b l)"),
         )
 
-        target_loss = (
-            F.nll_loss(
-                rearrange(out_loglogit, "b l c -> (b l) c"),
-                rearrange(labels, "b l -> (b l)"),
-                ignore_index=0,
-            )
-            * self.loss_weight
-        )
+        # target_loss = (
+        #     F.nll_loss(
+        #         rearrange(out_loglogit, "b l c -> (b l) c"),
+        #         rearrange(labels, "b l -> (b l)"),
+        #         ignore_index=0,
+        #     )
+        #     * self.loss_weight
+        # )
+        target_loss = llm_output.loss * self.loss_weight
         module.log("train_llm_generate_loss", target_loss, prog_bar=True)
         return target_loss
 
@@ -242,3 +249,11 @@ class PLHandle(BaseHandle):
                 [predicted],
                 [[text[b]]],
             )
+
+    def train_handle(self, module, is_train: bool):
+        """
+        Handle the training or validation step.
+        """
+        pass
+        # module.visual_adapter.eval()
+        # module.shared_encoder.eval()
