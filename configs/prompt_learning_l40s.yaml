@@ -35,7 +35,6 @@ vtm_mask_replace_prob: 0.6
 
 vtc_flag: False
 vtc_weight: 1.0
-vtc_queue_max_size: 4096
 
 pl_flag: True
 pl_weight: 1.0

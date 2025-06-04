@@ -17,7 +17,7 @@ num_query_token: 64
 connector:
   _target_: modules.LinearConnector
   in_features: 768
-  out_features: 1024 #flan-t5
+  out_features: 2048 #flan-t5
 
 freezer:
   _target_: modules.FullFreezer
