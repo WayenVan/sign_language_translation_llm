@@ -3,6 +3,7 @@ import numpy as np
 import os
 from tqdm import tqdm
 from concurrent.futures import ThreadPoolExecutor
+from joblib import Memory
 
 
 class Ph14TIndex:
@@ -20,6 +21,11 @@ class Ph14TIndex:
             data_root, "PHOENIX-2014-T/features/fullFrame-210x260px", self.mode
         )
 
+        # Setup joblib cache
+        self.cache_dir = ".cache/ph14t_index"
+        os.makedirs(self.cache_dir, exist_ok=True)
+        self.memory = Memory(self.cache_dir, verbose=0)
+
         self.raw_annotation = pl.read_csv(
             os.path.join(
                 self.data_root,
@@ -28,15 +34,21 @@ class Ph14TIndex:
             separator="|",
         )
         self.ids = self.raw_annotation["name"].to_list()
-        self._generate_frame_file_table()
 
-    def _generate_frame_file_table(self):
+        self._generate_frame_file_table = self.memory.cache(
+            self._generate_frame_file_table_impl
+        )
+        self.frame_file_table = self._generate_frame_file_table(
+            os.path.abspath(self.feature_root)
+        )
+
+    def _generate_frame_file_table_impl(self, abs_feature_root):
         # Process files in parallel with dynamic chunking
         workers = min(32, (os.cpu_count() or 1) * 4)
         chunk_size = max(1, len(self.ids) // (workers * 4))  # Dynamic chunking
 
         with ThreadPoolExecutor(max_workers=workers) as executor:
-            # Process batches of IDs in parallel
+            # Process batches of IDs in parallel
             futures = []
             for i in range(0, len(self.ids), chunk_size):
                 batch = self.ids[i : i + chunk_size]
@@ -48,7 +60,7 @@ class Ph14TIndex:
                 all_data.extend(future.result())
 
         # Single DataFrame creation
-        self.frame_file_table = pl.DataFrame(
+        return pl.DataFrame(
             all_data,
             schema={
                 "id": pl.Utf8,
@@ -94,7 +106,7 @@ class Ph14TIndex:
 
 
 if __name__ == "__main__":
-    data_root = "/root/projects/slt_set_llms/dataset/PHOENIX-2014-T-release-v3"
+    data_root = "dataset/PHOENIX-2014-T-release-v3/"
     ph14t_index = Ph14TIndex(data_root, "train")
     print(ph14t_index.frame_file_table)
 
