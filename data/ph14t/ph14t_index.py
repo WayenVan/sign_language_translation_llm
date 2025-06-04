@@ -3,7 +3,10 @@ import numpy as np
 import os
 from tqdm import tqdm
 from concurrent.futures import ThreadPoolExecutor
-from joblib import Memory
+from diskcache import Cache
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class Ph14TIndex:
@@ -13,6 +16,8 @@ class Ph14TIndex:
     generates a frame file table by multithreading to speed up the process.
     """
 
+    cache = Cache(".cache/ph14t_index")
+
     def __init__(self, data_root: str, mode: str = "train"):
         self.data_root = data_root
         self.mode = mode
@@ -20,11 +25,6 @@ class Ph14TIndex:
         self.feature_root = os.path.join(
             data_root, "PHOENIX-2014-T/features/fullFrame-210x260px", self.mode
         )
-
-        # Setup joblib cache
-        self.cache_dir = ".cache/ph14t_index"
-        os.makedirs(self.cache_dir, exist_ok=True)
-        self.memory = Memory(self.cache_dir, verbose=0)
 
         self.raw_annotation = pl.read_csv(
             os.path.join(
@@ -35,14 +35,24 @@ class Ph14TIndex:
         )
         self.ids = self.raw_annotation["name"].to_list()
 
-        self._generate_frame_file_table = self.memory.cache(
-            self._generate_frame_file_table_impl
-        )
-        self.frame_file_table = self._generate_frame_file_table(
-            os.path.abspath(self.feature_root)
+        self.frame_file_table = self._load_or_generate_frame_file_table(
+            self.feature_root
         )
 
-    def _generate_frame_file_table_impl(self, abs_feature_root):
+    def _load_or_generate_frame_file_table(self, feature_root: str):
+        abs_feature_root = os.path.abspath(feature_root)
+        cache_key = f"frame_file_table_{abs_feature_root}_{self.mode}"
+
+        if cache_key in self.cache:
+            logger.info("Uinsg cached frame file table.")
+            return self.cache[cache_key]
+        else:
+            logger.info("No cached frame file table found, generating new one.")
+            frame_file_table = self._generate_frame_file_table()
+            self.cache[cache_key] = frame_file_table
+            return frame_file_table
+
+    def _generate_frame_file_table(self):
         # Process files in parallel with dynamic chunking
         workers = min(32, (os.cpu_count() or 1) * 4)
         chunk_size = max(1, len(self.ids) // (workers * 4))  # Dynamic chunking
@@ -106,6 +116,7 @@ class Ph14TIndex:
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
     data_root = "dataset/PHOENIX-2014-T-release-v3/"
     ph14t_index = Ph14TIndex(data_root, "train")
     print(ph14t_index.frame_file_table)
