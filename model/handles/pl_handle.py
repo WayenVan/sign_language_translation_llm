@@ -155,10 +155,10 @@ class PLHandle(BaseHandle):
         """
         B, NUM_QUERIES, C = visual_features.shape
 
-        eos_token_id = module.llm_tokenizer.added_tokens_encoder["</s>"]
-        eos_token_embedding = module.llm.get_input_embeddings()(
-            torch.LongTensor([[eos_token_id]]).to(module.device)  # [1, 1]
-        )
+        # eos_token_id = module.llm_tokenizer.added_tokens_encoder["</s>"]
+        # eos_token_embedding = module.llm.get_input_embeddings()(
+        #     torch.LongTensor([[eos_token_id]]).to(module.device)  # [1, 1]
+        # )
 
         prompt = "translate to german: "
         prompt_ids = module.llm_tokenizer.encode(
@@ -168,9 +168,11 @@ class PLHandle(BaseHandle):
 
         llm_encode_features = torch.cat(
             [
+                module.llm_soft_prompt.expand(B, -1, C),  # [B, L, C]
                 prompt_embedding.expand(B, -1, C),  # [B, L, C]
                 visual_features,
-                eos_token_embedding.expand(B, 1, C),
+                # eos_token_embedding.expand(B, 1, C),
+                module.llm_soft_eos.expand(B, 1, C),  # [B, 1, C]
             ],
             dim=1,  # [b, prompt_length+num_queries+1, C]
         )
@@ -259,5 +261,3 @@ class PLHandle(BaseHandle):
         Handle the training or validation step.
         """
         pass
-        # module.visual_adapter.eval()
-        # module.shared_encoder.eval()

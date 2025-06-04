@@ -70,9 +70,17 @@ class SLTModel(LightningModule):
             # self.llm_tokenizer = FSMTTokenizer.from_pretrained(mname)
             mname = "google/flan-t5-large"
             self.llm = T5ForConditionalGeneration.from_pretrained(
-                mname, device_map="cpu", torch_dtype=torch.float32
+                mname, device_map="cpu", torch_dtype=torch.bfloat16
             )
             self.llm_tokenizer = T5Tokenizer.from_pretrained(mname)
+            self.llm_config = AutoConfig.from_pretrained(mname)
+            self.llm_hidden_size = self.llm_config.d_model
+            self.llm_soft_prompt = torch.nn.Parameter(
+                torch.randn(1, 20, self.llm_hidden_size), requires_grad=True
+            )
+            self.llm_soft_eos = torch.nn.Parameter(
+                torch.randn(1, 1, self.llm_hidden_size), requires_grad=True
+            )
 
             # NOTE: freezed llm
             for paras in self.llm.parameters():

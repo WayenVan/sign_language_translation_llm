@@ -1,6 +1,6 @@
 defaults:
   - base_train
-  # - override modules: sapiens_0.3b
+  - override modules: vitpose_base
   # - override data: ph14t_512x384_wonorm
   - _self_
 
@@ -10,6 +10,7 @@ devices: [0]
 
 data:
   batch_size: 2
+  batch_size_val_test: 2
 
 engine:
   lr_scheduler:
@@ -37,3 +38,5 @@ pl_flag: True
 pl_weight: 1.0
 
 inference_mode: False
+
+pretrained_checkpoint: outputs/train/2025-06-02_18-11-00/aeffcq2b-epoch=39-val_generate_bleu=0.3092.ckpt
