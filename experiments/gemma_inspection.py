@@ -17,7 +17,9 @@ model = Gemma3ForCausalLM.from_pretrained(
 
 prompt = "translate the following sentence to german, only produce the translated sentence: 'The world of machine learning is fascinating, isn't it?'"
 
+
 inputs = tokenizer(prompt, return_tensors="pt")
+
 
 output = model.generate(
     inputs["input_ids"].to("cuda:0"),
