@@ -31,8 +31,8 @@ class PLHandle(BaseHandle):
         self.llm_padding_idx = llm_padding_idx
 
         # NOTE: freeze adapter, and shared encoder
-        # for param in module.visual_adapter.parameters():
-        #     param.requires_grad = False
+        for param in module.visual_adapter.parameters():
+            param.requires_grad = False
         # for param in module.shared_encoder.parameters():
         #     param.requires_grad = False
         # module.visual_adapter.eval()
@@ -176,10 +176,10 @@ class PLHandle(BaseHandle):
         llm_prompt = torch.cat(
             [
                 bos_embed.expand(B, -1, -1),  # [B, 1, C]
-                prompt_embedding.expand(B, -1, C),  # [B, L, C]
                 module.llm_bov_token.expand(B, -1, C),  # [B, 1, C]
                 visual_features,
                 module.llm_sot_token.expand(B, -1, C),  # [B, 1, C]
+                prompt_embedding.expand(B, -1, C),  # [B, L, C]
             ],
             dim=1,  # [b, 1+prompt_length+1+num_queries+1, C]
         )
@@ -208,7 +208,7 @@ class PLHandle(BaseHandle):
         llm_outputs = module.llm(
             inputs_embeds=torch.cat(
                 [
-                    llm_prompt,  # [B, 1+prompt_length+1+num_queries+1, C]
+                    llm_prompt,  # [B, 1+1+num_queries+1+length_prompt, C]
                     text_embedding,  # [B, L, C]
                 ],
                 dim=1,  # [B, 1+prompt_length+1+num_queries+1+L, C]
@@ -284,5 +284,5 @@ class PLHandle(BaseHandle):
         Handle the training or validation step.
         """
         pass
-        # module.visual_adapter.eval()
+        module.visual_adapter.eval()
         # module.shared_encoder.eval()
