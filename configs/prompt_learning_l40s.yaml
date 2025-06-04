@@ -2,6 +2,7 @@ defaults:
   - base_train
   - override modules: vitpose_base
   # - override data: ph14t_512x384_wonorm
+  - override engine: cosine_anneal
   - _self_
 
 debug: False
@@ -9,13 +10,15 @@ max_epochs: 400
 devices: [0]
 
 data:
-  batch_size: 2
+  batch_size: 4
   batch_size_val_test: 2
 
 engine:
   lr_scheduler:
-    step_size: 50
-  optmizer:
+    T_max: 60
+    eta_min: 1e-5
+
+  optimizer:
     lr: 1e-4
 
 vtg_flag: False

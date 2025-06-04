@@ -68,7 +68,7 @@ class SLTModel(LightningModule):
             #     mname, device_map="cpu", torch_dtype=torch.float32
             # )
             # self.llm_tokenizer = FSMTTokenizer.from_pretrained(mname)
-            mname = "google/flan-t5-large"
+            mname = "google/flan-t5-xl"
             self.llm = T5ForConditionalGeneration.from_pretrained(
                 mname, device_map="cpu", torch_dtype=torch.bfloat16
             )
