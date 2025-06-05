@@ -46,11 +46,9 @@ class SLTModel(LightningModule):
         self.vtg_flag = getattr(self.cfg, "vtg_flag", False)
         self.vtm_flag = getattr(self.cfg, "vtm_flag", False)
         self.vtc_flag = getattr(self.cfg, "vtc_flag", False)
-        self.pl_flag = getattr(self.cfg, "pl_flag", False)
 
         self.contrastive_logit_scale = nn.Parameter(torch.ones([]) * np.log(1 / 0.07))
 
-        self._create_llm()
         self._create_visual_layers()
         self._create_bert_shared_encoder()
         self._create_handles()
@@ -60,47 +58,6 @@ class SLTModel(LightningModule):
         )
         # NOTE: freeze the visual encoder by freezer
         self.freezer.freeze()
-
-    def _create_llm(self):
-        if self.cfg.inference_mode or self.pl_flag:
-            self.connector = instantiate(self.cfg.modules.connector)
-
-            # mname = "WayenVan/wmt19-en-de"
-            # self.llm = FSMTForConditionalGeneration.from_pretrained(
-            #     mname, device_map="cpu", torch_dtype=torch.float32
-            # )
-            # self.llm_tokenizer = FSMTTokenizer.from_pretrained(mname)
-            # mname = "google/flan-t5-large"
-            # self.llm = T5ForConditionalGeneration.from_pretrained(
-            #     mname, device_map="cpu", torch_dtype=torch.float32
-            # )
-            # self.llm_tokenizer = T5Tokenizer.from_pretrained(mname)
-            mname = "google/gemma-3-4b-it"
-            self.llm = Gemma3ForCausalLM.from_pretrained(
-                mname, device_map="cpu", torch_dtype=torch.bfloat16
-            )
-            self.llm_tokenizer = GemmaTokenizerFast.from_pretrained(mname)
-            self.llm_config = AutoConfig.from_pretrained(mname)
-            self.llm_tokenizer.padding_side = "right"
-            self.llm_hidden_size = self.llm_config.text_config.hidden_size
-
-            # add sepcial tokens, begain of video, start of translation
-            self.llm_bov_token = nn.Parameter(
-                torch.randn(1, 1, self.llm_hidden_size), requires_grad=True
-            )
-            self.llm_soft_token = nn.Parameter(
-                torch.randn(1, 20, self.llm_hidden_size), requires_grad=True
-            )
-
-            # NOTE: freezed llm
-            for paras in self.llm.parameters():
-                paras.requires_grad = False
-            self.llm.eval()
-
-        else:
-            self.llm = None
-            self.llm_tokenizer = None
-            self.connector = None
 
     def _create_handles(self):
         self.handles = nn.ModuleDict()
@@ -116,20 +73,6 @@ class SLTModel(LightningModule):
         if self.vtc_flag:
             self.handles["vtc"] = VTCHandle(self.hidden_size, self.cfg)
             self.vtc_weight = self.cfg.vtc_weight
-
-        if self.pl_flag and (self.vtm_flag or self.vtg_flag or self.vtc_flag):
-            raise ValueError(
-                "Prompt learning is not supported with VTM or VTG. Please set prompt_learning to False."
-            )
-
-        if self.pl_flag:
-            self.handles["pl"] = PLHandle(
-                self,
-                # len(self.llm_tokenizer),
-                self.llm_tokenizer.vocab_size,
-                self.cfg.pl_weight,
-                self.llm_tokenizer.pad_token_id,
-            )
 
     def _create_visual_layers(self):
         self.visual_encoder = instantiate(self.cfg.modules.visual_encoder)

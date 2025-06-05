@@ -17,7 +17,7 @@ from lightning.pytorch.loggers import WandbLogger
 import lightning.pytorch as pl
 import torch
 
-from model.slt import SLTModel
+from model.slt_pl import SLTModelForLLMFineTune
 import cv2
 
 from misc.git_utils import save_git_info
@@ -50,6 +50,7 @@ def train(cfg: DictConfig) -> None:
     ]
 
     cfg.data.datamodule.num_workers = 1
+    cfg.data.batch_size = 1
 
     # NOTE: start training
     t = Trainer(
@@ -66,31 +67,21 @@ def train(cfg: DictConfig) -> None:
         logger=None,
         # WARN: will slow down the training process, just for debug now
         # detect_anomaly=True,
-        num_sanity_val_steps=0,  # NOTE: disable sanity check
+        num_sanity_val_steps=2,  # NOTE: disable sanity check
     )
 
     logger.info(f"Process in local rank {t.local_rank}, global rank {t.global_rank}")
 
     datamodule = instantiate(cfg.data.datamodule, cfg)
 
-    model = SLTModel(cfg=cfg)
-
+    model = SLTModelForLLMFineTune(cfg=cfg)
     state_dict = torch.load(
         cfg.pretrained_checkpoint, map_location=f"cuda:{t.local_rank}"
     )["state_dict"]
+    model.load_from_bootstrap(state_dict)
 
-    # NOTE: remove some of the keys connector
-    for key in list(state_dict.keys()):
-        if key.startswith("connector."):
-            del state_dict[key]
-
-    keys = model.load_state_dict(state_dict, strict=False)
-
-    # NOTE: print information
-    for key in keys.missing_keys:
-        logger.warning(f"Missing key {key} in the state dict")
-    for key in keys.unexpected_keys:
-        logger.warning(f"Unexpected key {key} in the state dict")
+    # start train
+    t.fit(model, datamodule=datamodule)
 
     t.fit(model, datamodule=datamodule)
 
