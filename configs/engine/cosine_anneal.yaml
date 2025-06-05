@@ -1,0 +1,8 @@
+optimizer:
+  _target_: torch.optim.Adam
+  lr: 1e-5
+
+lr_scheduler:
+  _target_: torch.optim.lr_scheduler.CosineAnnealingLR
+  T_max: 50
+  eta_min: 1e-5

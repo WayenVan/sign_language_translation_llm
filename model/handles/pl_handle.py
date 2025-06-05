@@ -33,9 +33,7 @@ class PLHandle(BaseHandle):
         # NOTE: freeze adapter, and shared encoder
         for param in module.visual_adapter.parameters():
             param.requires_grad = False
-        # for param in module.shared_encoder.parameters():
-        #     param.requires_grad = False
-        # module.visual_adapter.eval()
+        module.visual_adapter.eval()
         # module.shared_encoder.eval()
 
     def dispatch_batch(self, batch, device):
@@ -156,7 +154,7 @@ class PLHandle(BaseHandle):
     def _prepare_llm_prompt(self, module, visual_features):
         """
         Prepare the input for the LLM encoder.
-        [<bos> translate to german <bov> visual features <sot>]
+        [<bos> visual_features <soft_token> <bos> prompt + .....]
         visual_features: [B, NUM_QUERIES, C]
         """
         B, NUM_QUERIES, C = visual_features.shape
@@ -175,13 +173,13 @@ class PLHandle(BaseHandle):
 
         llm_prompt = torch.cat(
             [
-                bos_embed.expand(B, -1, -1),  # [B, 1, C]
                 module.llm_bov_token.expand(B, -1, C),  # [B, 1, C]
                 visual_features,
-                module.llm_sot_token.expand(B, -1, C),  # [B, 1, C]
+                module.llm_soft_token.expand(B, -1, C),  # [B, SOFT_LENGTH, C]
+                bos_embed.expand(B, -1, -1),  # [B, 1, C]
                 prompt_embedding.expand(B, -1, C),  # [B, L, C]
             ],
-            dim=1,  # [b, 1+prompt_length+1+num_queries+1, C]
+            dim=1,  # [b, 1+num_queries+SOFT_LENGTH+1+L, C]
         )
         return llm_prompt
 
@@ -208,13 +206,13 @@ class PLHandle(BaseHandle):
         llm_outputs = module.llm(
             inputs_embeds=torch.cat(
                 [
-                    llm_prompt,  # [B, 1+1+num_queries+1+length_prompt, C]
+                    llm_prompt,  # [B, total_prompt_length, C]
                     text_embedding,  # [B, L, C]
                 ],
-                dim=1,  # [B, 1+prompt_length+1+num_queries+1+L, C]
+                dim=1,  # [B, total_prompt_length+L, C]
             ),
             attention_mask=attention_mask,
-            labels=labels,
+            labels=labels,  # [B, L+1]
             use_cache=False,
             logits_to_keep=TEXT_LENGTH + 1,
         )

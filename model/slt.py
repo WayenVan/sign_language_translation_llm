@@ -88,8 +88,8 @@ class SLTModel(LightningModule):
             self.llm_bov_token = nn.Parameter(
                 torch.randn(1, 1, self.llm_hidden_size), requires_grad=True
             )
-            self.llm_sot_token = nn.Parameter(
-                torch.randn(1, 1, self.llm_hidden_size), requires_grad=True
+            self.llm_soft_token = nn.Parameter(
+                torch.randn(1, 20, self.llm_hidden_size), requires_grad=True
             )
 
             # NOTE: freezed llm

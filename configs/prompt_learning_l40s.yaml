@@ -14,9 +14,9 @@ data:
 
 engine:
   lr_scheduler:
-    step_size: 50
+    step_size: 100
   optimizer:
-    lr: 1e-4
+    lr: 1e-5
 
 vtg_flag: False
 vtg_weight: 1.0
