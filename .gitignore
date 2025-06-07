@@ -1,3 +1,4 @@
+stubs/
 wandb/
 .aider*
 lightning_logs/

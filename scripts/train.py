@@ -19,6 +19,7 @@ import torch
 from model.slt import SLTModel
 import cv2
 
+
 from misc.git_utils import save_git_info
 from typing import Any, Dict
 

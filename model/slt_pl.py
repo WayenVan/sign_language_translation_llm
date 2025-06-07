@@ -1,3 +1,4 @@
+from re import S
 import torch
 from lightning import LightningModule
 from transformers import AutoTokenizer, AutoConfig
@@ -12,6 +13,7 @@ from transformers.models.gemma3 import Gemma3ForConditionalGeneration, Gemma3For
 from transformers.models.gemma.tokenization_gemma_fast import GemmaTokenizerFast
 from torchmetrics import Accuracy
 from torchmetrics.text import BLEUScore
+from transformers.models.gemma3 import Gemma
 
 
 # from modules.fsmt.modeling_fsmt import FSMTForConditionalGeneration
@@ -28,6 +30,7 @@ from transformers.models.bert import BertLMHeadModel as BertLMHeadModelFromHF
 
 from torch import nn
 from torch.optim import Optimizer
+
 
 logger = logging.getLogger(__name__)  # NOTE: lightning already setupo the logger for us
 
@@ -496,7 +499,7 @@ if __name__ == "__main__":
         "debug": True,
     }
     cfg = DictConfig(cfg)
-    model = SLTModel(cfg, vocab).cuda()
+    model = SLTModelForLLMFineTune(cfg, vocab).cuda()
     # print(model.llm_embedding_layer)
     # print(model.llm_hidden_size)
     # print(model.padding_idx)

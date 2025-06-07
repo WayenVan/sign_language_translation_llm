@@ -1,17 +1,13 @@
 import torch
 from lightning import LightningModule
-from transformers import AutoTokenizer, AutoConfig
+from transformers import AutoTokenizer
 from omegaconf import DictConfig
 from hydra.utils import instantiate
 from typing import Dict, Any
 import logging
-from typing import Optional, List
-from einops import rearrange
+from typing import Optional
 from collections import OrderedDict
 import numpy as np
-from transformers.models.t5 import T5Tokenizer, T5ForConditionalGeneration
-from transformers.models.gemma3 import Gemma3ForConditionalGeneration, Gemma3ForCausalLM
-from transformers.models.gemma.tokenization_gemma_fast import GemmaTokenizerFast
 
 
 # from modules.fsmt.modeling_fsmt import FSMTForConditionalGeneration
@@ -27,11 +23,12 @@ from transformers.models.bert import BertLMHeadModel as BertLMHeadModelFromHF
 
 from .handles.vtg_handle import VTGHandle
 from .handles.vtm_handle import VTMHandle
-from .handles.pl_handle import PLHandle
 from .handles.vtc_handle import VTCHandle
+
 
 from torch import nn
 from torch.optim import Optimizer
+
 
 logger = logging.getLogger(__name__)  # NOTE: lightning already setupo the logger for us
 

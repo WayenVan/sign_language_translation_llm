@@ -11,6 +11,7 @@
     "outputs",
     "sapeins_configs",
     "lightning_logs",
+    "experiments",
     "wandb",
   ],
   "include": [
@@ -23,5 +24,8 @@
     "analysis/**"
   ],
   "typeCheckingMode": "off",
-  "useLibraryCodeForTypes": false,
+  "useLibraryCodeForTypes": true,
+  "diagnosticMode": "openFilesOnly",
+  "reportReturnType": false,
+  "stubPath": "stubs",
 }
