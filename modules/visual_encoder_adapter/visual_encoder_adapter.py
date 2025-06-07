@@ -23,6 +23,7 @@ class VisualAdapter(nn.Module):
         proj_drop=0.0,
         attn_drop=0.0,
         drop_path=0.0,
+        max_length: Optional[int] = 512,
     ):
         super().__init__()
         self.num_extra_queries = num_extra_queries
@@ -46,6 +47,7 @@ class VisualAdapter(nn.Module):
             ]
         )
         self.linear = nn.Linear(hidden_size, target_hidden_size)
+        self.positional_embedding = nn.Embedding(max_length, target_hidden_size)
 
     def forward(self, x, v_length):
         # x: (B, T, HW, C)
@@ -59,7 +61,14 @@ class VisualAdapter(nn.Module):
         extra_queries = rearrange(extra_queries, "(b t) n c -> b t n c", b=B, t=T)
 
         feats = extra_queries.mean(dim=-2)  # (B T C)
-        feats = self.linear(feats)
+
+        position_ids = (
+            torch.arange(T, device=x.device).unsqueeze(0).expand(B, -1)
+        )  # (B, T)
+        position_embeddings = self.positional_embedding(
+            position_ids
+        )  # (B, T, Target_hidden_size)
+        feats = self.linear(feats) + position_embeddings
 
         return feats, v_length
 
@@ -121,10 +130,11 @@ if __name__ == "__main__":
     num_heads = 12
     num_layers = 6
     num_extra_queries = 10
+    target_hidden_size = 1024
 
     visual_adapter = VisualAdapter(
-        hidden_size, num_heads, num_layers, num_extra_queries
+        hidden_size, target_hidden_size, num_heads, num_layers, num_extra_queries
     )
     x = torch.randn(2, 30, 196, hidden_size)  # Example input
-    output = visual_adapter(x)
-    print(output.shape)  # Should be (2, 30, num_extra_queries, hidden_size)
+    output = visual_adapter(x, v_length=torch.tensor([30, 30]))  # Example v_length
+    print(output[0].shape)  # Should be (2, 30, num_extra_queries, hidden_size)
