@@ -4,6 +4,10 @@ from openai import OpenAI
 import os
 import polars as pl
 
+
+from transformers.models.deepseek_v3.modeling_deepseek_v3 import DeepseekV3Attention
+
+
 outputs = open("outputs/outputs.txt", "w")
 
 api_key = os.getenv("DEEPSEEK_API_KEY")

@@ -130,7 +130,7 @@ class DebugCallback(callbacks.Callback):
         self,
         trainer: "pl.Trainer",
         pl_module: "pl.LightningModule",
-        optimizer: any,
+        optimizer: Any,
     ) -> None:
         nan_flag = False
         for name, param in pl_module.named_parameters():
