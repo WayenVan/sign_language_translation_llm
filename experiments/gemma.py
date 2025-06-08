@@ -4,10 +4,16 @@ import os
 sys.path.append(".")
 from data.ph14t.ph14t_index import Ph14TIndex
 import torch
-from transformers import AutoTokenizer, AutoModelForCausalLM
+
+# from transformers import AutoTokenizer, AutoModelForCausalLM
 from transformers.models.gemma3 import Gemma3ForCausalLM
 from transformers.models.gemma.tokenization_gemma_fast import GemmaTokenizerFast
 from huggingface_hub import login
+
+from transformers.models.auto.tokenization_auto import AutoTokenizer
+from transformers.models.auto.modeling_auto import AutoModel
+from transformers.models.auto.configuration_auto import AutoConfig
+
 
 # token = os.environ.get("HUGGINGFACE_HUB_TOKEN")
 # login(token)

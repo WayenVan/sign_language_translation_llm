@@ -26,6 +26,5 @@
   "typeCheckingMode": "off",
   "useLibraryCodeForTypes": true,
   "diagnosticMode": "openFilesOnly",
-  "reportReturnType": false,
   "stubPath": "stubs",
 }

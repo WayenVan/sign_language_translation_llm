@@ -1,11 +1,9 @@
-import torch
 from lightning import LightningModule
 from transformers import AutoTokenizer
 from omegaconf import DictConfig
 from hydra.utils import instantiate
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 import logging
-from typing import Optional
 from collections import OrderedDict
 import numpy as np
 
@@ -27,7 +25,7 @@ from .handles.vtc_handle import VTCHandle
 
 from torch import nn
 from torch.optim import Optimizer
-
+import torch
 
 logger = logging.getLogger(__name__)  # NOTE: lightning already setupo the logger for us
 

@@ -26,6 +26,3 @@ vtm_mask_replace_prob: 0.6
 
 vtc_flag: True
 vtc_weight: 1.0
-
-prompt_learning: False
-inference_mode: False
