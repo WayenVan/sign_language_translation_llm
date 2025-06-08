@@ -25,7 +25,7 @@ def test_max_data_length():
 
 
 def test_dataset():
-    data_root = "/root/projects/slt_set_llms/dataset/PHOENIX-2014-T-release-v3"
+    data_root = "dataset/PHOENIX-2014-T-release-v3"
     mode = "train"
 
     dataset = Ph14TDataset(data_root, mode)
@@ -37,7 +37,7 @@ def test_dataset():
 
 def test_datamodule():
     initialize(config_path="../configs")
-    cfg = compose("test_train")
+    cfg = compose("initial_train_l40s")
 
     datamodule = Ph14TDataModule(cfg)
     datamodule.setup("fit")
@@ -75,7 +75,7 @@ def test_data_validation():
 
 
 if __name__ == "__main__":
-    test_dataset()
-    # test_datamodule()
+    # test_dataset()
+    test_datamodule()
     # test_data_validation()
     # test_max_data_length()

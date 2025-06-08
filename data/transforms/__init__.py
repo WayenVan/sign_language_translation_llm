@@ -8,7 +8,14 @@ from .video import (
     UniformSampleVideo,
 )
 
+from .text import (
+    RandomWordAugmentation,
+    ExtendedPh14TTextAugmentation,
+)
+
 __all__ = [
+    "RandomWordAugmentation",
+    "ExtendedPh14TTextAugmentation",
     "UniformSampleVideo",
     "CenterCropVideo",
     "RandomCropVideo",

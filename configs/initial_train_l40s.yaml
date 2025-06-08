@@ -1,7 +1,7 @@
 defaults:
   - base_train
   - override modules: vitpose_base
-  # - override data: ph14t_512x384_wonorm
+  - override data: ph14t_with_text_aug
   - _self_
 
 debug: False
@@ -9,7 +9,8 @@ max_epochs: 400
 devices: [0]
 
 data:
-  batch_size: 2
+  batch_size: 8
+  batch_size_val_test: 4
   datamodule:
     num_workers: 12
 
@@ -36,3 +37,6 @@ vtc_weight: 1.0
 
 prompt_learning: False
 inference_mode: False
+
+ph14t:
+  extended_csv_dir: outputs/ph14t_text_augmented

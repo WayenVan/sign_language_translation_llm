@@ -7,6 +7,8 @@ from omegaconf import DictConfig
 from hydra.utils import instantiate
 import numpy as np
 
+from typing import List
+
 
 class Ph14TDataModule(LightningDataModule):
     def __init__(
@@ -92,11 +94,20 @@ class Ph14TDataModule(LightningDataModule):
             for video in videos
         ]
         padded_videos = torch.stack(padded_videos)
-        text = [item["text"] for item in batch]
-        ids = [item["id"] for item in batch]
-        return dict(
-            ids=ids,
-            video=padded_videos,
-            video_length=torch.tensor(v_length, dtype=torch.int64),
-            text=text,
-        )
+
+        ret = dict(video=padded_videos)
+
+        # handle other keys in the batch
+        for key in batch[0].keys():
+            if key == "video":
+                continue
+            if isinstance(batch[0][key], torch.Tensor):
+                ret[key] = torch.stack([item[key] for item in batch])
+            elif (
+                isinstance(batch[0][key], List)
+                or isinstance(batch[0][key], str)
+                or isinstance(batch[0][key], tuple)
+            ):
+                ret[key] = [item[key] for item in batch]
+
+        return ret

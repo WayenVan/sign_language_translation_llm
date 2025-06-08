@@ -4,7 +4,6 @@ from openai import OpenAI
 import os
 import polars as pl
 
-
 from transformers.models.deepseek_v3.modeling_deepseek_v3 import DeepseekV3Attention
 
 
@@ -21,14 +20,15 @@ df = pl.read_csv(
 
 system_prompt = """
 You are a professional german language specialist.
-Your task is to comppress the following german text to a keywords list.
-The rules are as follows:
-1. keep original words and phrases, do not change the order of the words.
-2. Retrain the original meaning of the text as much as possible.
-3. The generated keywords list should be able to reconstruct the original text.
-2. the formate should be like this: keywords1, keywords2, keywords3
-3. do not include any other text, only the keywords list.
-4. each keyword should only contain one word, do not include any special characters.
+Your task is to performance a data augmentation task for the given text.
+Your should generate a new text that is similar to the given text, but with some variations.
+Hoewever, you should strictly not change the meaning of the text.
+Try to use the same words as much as possible but change structure of sentance.
+Dot not add any markers or special characters, just the text. As it was in the original text.
+Each sentence should genearte 5 variations, and each variation should be separated by a new line.
+The output should only contain the generated text, without any additional text or markers.
+Remove all punctuation marks, special characters from the text.
+
 """
 
 text = df[3, -1]
@@ -46,6 +46,9 @@ response = client.chat.completions.create(
 )
 
 result = response.choices[0].message.content
-print(result)
-outputs.write(result + "\n")
+
+results = result.split("\n")
 outputs.close()
+
+for r in results:
+    print(r)

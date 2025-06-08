@@ -15,7 +15,6 @@ import numpy as np
 from modules.extended_embeddings import CustomEmbeddingLayer
 from modules.q_former.q_former import (
     BertLMHeadModel,
-    BertModel,
     BertConfig,
     BertOnlyMLMHead,
 )
@@ -226,7 +225,6 @@ class SLTModel(LightningModule):
         for name in list(checkpoint.keys()):
             if name.startswith("llm"):
                 del checkpoint[name]
-        return checkpoint
 
     @staticmethod
     def length_to_mask(lengths, max_length=None):
