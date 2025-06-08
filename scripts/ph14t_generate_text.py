@@ -127,6 +127,9 @@ def main(ph14t_root, output_dir, num_workers, verify_mode):
 
 
 def verify_texts(output_dir, ph14t_root):
+    """
+    verify the generated texts to ensure that each ID has 5 variations
+    """
     logger = logging.getLogger(__name__)
     logger.addHandler(logging.FileHandler(output_dir + "/verify_log.log", mode="w"))
     logger.addHandler(logging.StreamHandler())
