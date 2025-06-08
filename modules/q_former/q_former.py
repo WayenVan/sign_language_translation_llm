@@ -13,8 +13,9 @@ from transformers.generation.utils import GenerationMixin
 
 import torch
 import torch.utils.checkpoint
-from torch import nn
+from torch import nn, Tensor
 from torch.nn import CrossEntropyLoss
+from torch import device
 
 from typing import Optional, Tuple, Union
 from transformers.activations import ACT2FN

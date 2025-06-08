@@ -95,7 +95,7 @@ class Ph14TDataModule(LightningDataModule):
         ]
         padded_videos = torch.stack(padded_videos)
 
-        ret = dict(video=padded_videos)
+        ret = dict(video=padded_videos, video_length=torch.tensor(v_length).long())
 
         # handle other keys in the batch
         for key in batch[0].keys():

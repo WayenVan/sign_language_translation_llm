@@ -32,7 +32,7 @@ class VTMHandle(BaseHandle):
         )
 
     def dispatch_batch(self, batch, device):
-        ids = batch["ids"]
+        ids = batch["id"]
         video = batch["video"].to(device)
         video_length = batch["video_length"].to(device)
         text = batch["text"]

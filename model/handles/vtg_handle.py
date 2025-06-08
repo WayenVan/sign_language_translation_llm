@@ -46,7 +46,7 @@ class VTGHandle(BaseHandle):
     def dispatch_batch(
         self, batch, device
     ) -> tuple[list[str], torch.Tensor, torch.Tensor, List[str]]:
-        ids: list[str] = batch["ids"]
+        ids: list[str] = batch["id"]
         video: torch.Tensor = batch["video"].to(device)
         video_length: torch.Tensor = batch["video_length"].to(device)
         text: list[str] = batch["text"]
@@ -263,7 +263,7 @@ class VTGHandle(BaseHandle):
             indexs = indexs[:eos_index]
             predicted = module.tokenizer.decode(indexs, skip_special_tokens=True)
 
-            if "exteded_texts" in batch:
+            if "extended_texts" in batch:
                 self.extended_bleu.update([predicted], [batch["extended_texts"][b]])
 
             if "original_text" in batch:

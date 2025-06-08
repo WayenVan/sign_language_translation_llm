@@ -6,17 +6,17 @@ defaults:
 
 debug: False
 max_epochs: 400
-devices: [0]
+devices: [0, 1]
 
 data:
   batch_size: 4
   batch_size_val_test: 2
   datamodule:
-    num_workers: 12
+    num_workers: 8
 
 engine:
   lr_scheduler:
-    step_size: 50
+    step_size: 100
   optmizer:
     lr: 1e-4
 
@@ -34,9 +34,6 @@ vtm_mask_replace_prob: 0.6
 
 vtc_flag: True
 vtc_weight: 1.0
-
-prompt_learning: False
-inference_mode: False
 
 ph14t:
   extended_csv_dir: outputs/ph14t_text_augmented
