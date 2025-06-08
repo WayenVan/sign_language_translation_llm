@@ -6,6 +6,7 @@ from typing import List
 from einops import rearrange, repeat
 from torchmetrics import Accuracy, BLEUScore
 from transformers import DataCollatorForWholeWordMask
+from lightning.pytorch import LightningModule
 
 
 class VTGHandle(BaseHandle):
@@ -32,6 +33,8 @@ class VTGHandle(BaseHandle):
         )
 
         self.bleu = BLEUScore(n_gram=1, smooth=True)
+        self.extended_bleu = BLEUScore(n_gram=1, smooth=True)
+
         self.collator = DataCollatorForWholeWordMask(
             tokenizer=tokenizer,
             mlm=True,
@@ -40,11 +43,13 @@ class VTGHandle(BaseHandle):
             random_replace_prob=cfg.vtg_mask_replace_prob,
         )
 
-    def dispatch_batch(self, batch, device):
-        ids = batch["ids"]
-        video = batch["video"].to(device)
-        video_length = batch["video_length"].to(device)
-        text = batch["text"]
+    def dispatch_batch(
+        self, batch, device
+    ) -> tuple[list[str], torch.Tensor, torch.Tensor, List[str]]:
+        ids: list[str] = batch["ids"]
+        video: torch.Tensor = batch["video"].to(device)
+        video_length: torch.Tensor = batch["video_length"].to(device)
+        text: list[str] = batch["text"]
 
         return ids, video, video_length, text
 
@@ -63,6 +68,16 @@ class VTGHandle(BaseHandle):
         bleu = self.bleu.compute()
         module.log("val_generate_bleu", bleu, prog_bar=True, sync_dist=True)
         self.bleu.reset()
+
+        if self.extended_bleu._update_count > 0:
+            extended_bleu = self.extended_bleu.compute()
+            module.log(
+                "val_generate_extended_bleu",
+                extended_bleu,
+                prog_bar=True,
+                sync_dist=True,
+            )
+        self.extended_bleu.reset()
 
     def tokenize(self, text: List[str], tokenizer, device, use_mask=True):
         """
@@ -192,7 +207,12 @@ class VTGHandle(BaseHandle):
         return visual_features, textaul_embeddings, text_logits, text_attention_mask
 
     def train_step(
-        self, module: lightning, batch, batch_idx, visual_embeddings, v_length
+        self,
+        module: LightningModule,
+        batch,
+        batch_idx,
+        visual_embeddings,
+        v_length,
     ):
         ids, _, _, text = self.dispatch_batch(batch, module.device)
         text_ids, labels, text_mask = self.tokenize(
@@ -222,9 +242,7 @@ class VTGHandle(BaseHandle):
         module.log("train_generate_loss", target_loss, prog_bar=True)
         return target_loss
 
-    def validation_step(
-        self, module: lightning, batch, batch_idx, visual_embeddings, v_length
-    ):
+    def validation_step(self, module, batch, batch_idx, visual_embeddings, v_length):
         ids, _, _, text = self.dispatch_batch(batch, module.device)
 
         B = len(ids)
@@ -244,7 +262,11 @@ class VTGHandle(BaseHandle):
                 eos_index = len(indexs)
             indexs = indexs[:eos_index]
             predicted = module.tokenizer.decode(indexs, skip_special_tokens=True)
-            self.bleu.update(
-                [predicted],
-                [[text[b]]],
-            )
+
+            if "exteded_texts" in batch:
+                self.extended_bleu.update([predicted], [batch["extended_texts"][b]])
+
+            if "original_text" in batch:
+                self.bleu.update([predicted], [[batch["original_text"][b]]])
+            else:
+                self.bleu.update([predicted], [[text[b]]])
