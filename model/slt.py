@@ -26,6 +26,8 @@ from .handles.vtc_handle import VTCHandle
 from torch import nn
 from torch.optim import Optimizer
 import torch
+from torch import Tensor
+
 
 logger = logging.getLogger(__name__)  # NOTE: lightning already setupo the logger for us
 
@@ -181,6 +183,46 @@ class SLTModel(LightningModule):
         self.log("train_loss", loss, prog_bar=True)
         return loss
 
+    def dispatch_batch(
+        self, batch, device
+    ) -> tuple[list[str], torch.Tensor, torch.Tensor, list[str]]:
+        ids: list[str] = batch["id"]
+        video: torch.Tensor = batch["video"].to(device)
+        video_length: torch.Tensor = batch["video_length"].to(device)
+        text: list[str] = batch["text"]
+
+        return ids, video, video_length, text
+
+    def test_step(self, batch, batch_idx):
+        ids, video, video_length, text = self.dispatch_batch(batch, self.device)
+
+        # forward visual features to avoid duplicated memory computation
+        visual_embeddings, v_length = self.forward_visual(video, video_length)
+
+        B = len(ids)
+
+        with torch.no_grad():
+            # NOTE: max length in dev set is 50
+            generated, distributions = self.generate(
+                video_embeddings=visual_embeddings, video_length=v_length, max_length=50
+            )
+            generated = generated.cpu().tolist()
+
+        # ----------generate predicted texts----------
+        predicted_texts = []
+        for b in range(B):
+            indexs = generated[b]
+            try:
+                eos_index = indexs.index(self.tokenizer.eos_token_id)
+            except ValueError:
+                eos_index = len(indexs)
+            indexs = indexs[:eos_index]
+            predicted = self.tokenizer.decode(indexs, skip_special_tokens=True)
+            predicted_texts.append(predicted)
+
+        # ---------- perserve the distributions ----------
+        # TODO: preserve the distributions
+
     def validation_step(self, batch, batch_idx):
         # forward visual features to avoid duplicated memory computation
         video = batch["video"].to(self.device)
@@ -242,10 +284,11 @@ class SLTModel(LightningModule):
     @torch.no_grad()
     def generate(
         self,
-        video: torch.Tensor = None,
-        video_length: torch.Tensor = None,
+        video: Tensor | None = None,
+        video_length: Tensor | None = None,
         video_embeddings: Optional[torch.Tensor] = None,
-        max_length: Optional[int] = 30,
+        max_length: int = 30,
+        output_distribution: bool = False,
     ):
         """
         @param video: (batch_size, seq_len, 3, h, w)
@@ -281,6 +324,8 @@ class SLTModel(LightningModule):
 
             # Initialize generation state
             output = []
+            if output_distribution:
+                distributions = []
             unfinished = torch.ones(B, dtype=torch.bool, device=device)
             input = torch.full(
                 (B, 1), self.tokenizer.bos_token_id, device=device, dtype=torch.long
@@ -311,6 +356,9 @@ class SLTModel(LightningModule):
                 # update output
                 output.append(next_tokens.unsqueeze(-1))  # [B, 1]
 
+                if output_distribution:
+                    distributions.append(logits.unsqueeze(1))  # [B, 1, C]
+
                 # Prepare next inputs
                 input = torch.cat((input, next_tokens.unsqueeze(-1)), dim=1)
                 attn_mask = torch.cat(
@@ -318,11 +366,21 @@ class SLTModel(LightningModule):
                 )
 
             # [B L]
-            return (
+            results = (
                 torch.cat(output, dim=1)
                 if len(output) > 0
                 else torch.empty(B, 0, device=device)
             )
+
+            if output_distribution:
+                distributions = (
+                    torch.cat(distributions, dim=1)
+                    if len(distributions) > 0
+                    else torch.empty(B, 0, self.vocab_size, device=device)
+                )
+                return results, distributions
+
+            return results
 
 
 if __name__ == "__main__":
@@ -335,7 +393,7 @@ if __name__ == "__main__":
         "debug": True,
     }
     cfg = DictConfig(cfg)
-    model = SLTModel(cfg, vocab).cuda()
+    model = SLTModel(cfg).cuda()
     # print(model.llm_embedding_layer)
     # print(model.llm_hidden_size)
     # print(model.padding_idx)
