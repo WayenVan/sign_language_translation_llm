@@ -6,6 +6,9 @@ from typing import Dict, Any, Optional
 import logging
 from collections import OrderedDict
 import numpy as np
+import os
+import shutil
+import polars as pl
 
 
 # from modules.fsmt.modeling_fsmt import FSMTForConditionalGeneration
@@ -193,6 +196,26 @@ class SLTModel(LightningModule):
 
         return ids, video, video_length, text
 
+    def set_test_output_dir(self, output_dir: str):
+        # ---- clean up the output directory ----
+        shutil.rmtree(output_dir, ignore_errors=True)
+        self.mkdir(output_dir, exist_ok=True)
+        self.output_dir = output_dir
+
+    def on_test_start(self):
+        if not hasattr(self, "output_dir"):
+            raise ValueError(
+                "Output directory not set. Call set_test_output_dir first."
+            )
+
+        self.test_predicted_result = pl.DataFrame(
+            {
+                "id": [],
+                "predicted_text": [],
+            }
+        )
+        self.text_predicted_distribution = []
+
     def test_step(self, batch, batch_idx):
         ids, video, video_length, text = self.dispatch_batch(batch, self.device)
 
@@ -217,11 +240,38 @@ class SLTModel(LightningModule):
             except ValueError:
                 eos_index = len(indexs)
             indexs = indexs[:eos_index]
-            predicted = self.tokenizer.decode(indexs, skip_special_tokens=True)
+            predicted: list[str] = self.tokenizer.decode(
+                indexs, skip_special_tokens=True
+            )
             predicted_texts.append(predicted)
+            np.save(
+                os.path.join(
+                    self.output_dir,
+                    os.path.join(
+                        self.output_dir, "distributions", f"{ids[b]}_distribution.npy"
+                    ),
+                ),
+                distributions[b].cpu().numpy(),
+            )
 
-        # ---------- perserve the distributions ----------
-        # TODO: preserve the distributions
+        self.test_predicted_result = pl.concat(
+            [
+                self.test_predicted_result,
+                pl.DataFrame(
+                    {
+                        "id": ids,
+                        "predicted_text": predicted_texts,
+                    }
+                ),
+            ]
+        )
+
+    def on_test_end(self):
+        self.test_predicted_result.write_csv(
+            os.path.join(self.output_dir, "predicted_texts.csv"),
+            separator="|",
+        )
+        self.test_predicted_result = None
 
     def validation_step(self, batch, batch_idx):
         # forward visual features to avoid duplicated memory computation
