@@ -187,9 +187,7 @@ class VTMHandle(BaseHandle):
 
         return loss
 
-    def validation_step(
-        self, module: lightning, batch, batch_idx, visual_embeddings, v_length
-    ):
+    def validation_step(self, module, batch, batch_idx, visual_embeddings, v_length):
         ids, _, _, text = self.dispatch_batch(batch, module.device)
 
         masked_text_ids, mask_text_labels, text_attention_mask = self.tokenize(

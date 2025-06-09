@@ -21,3 +21,5 @@ connector:
   out_features: 2560 #gemma3 1b
 freezer:
   _target_: modules.FullFreezer
+
+num_soft_prompt_token: 10

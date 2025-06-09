@@ -19,3 +19,5 @@ connector:
   in_features: 768
   out_features: 1024 #gemma3 1b
   # out_features: 2560 #gemma3 1b
+
+num_soft_prompt_token: 10

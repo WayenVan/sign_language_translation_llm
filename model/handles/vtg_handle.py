@@ -33,7 +33,12 @@ class VTGHandle(BaseHandle):
         )
 
         self.bleu = BLEUScore(n_gram=1, smooth=True)
+        self.blue4 = BLEUScore(n_gram=4, smooth=True)
         self.extended_bleu = BLEUScore(n_gram=1, smooth=True)
+        self.extended_bleu4 = BLEUScore(
+            n_gram=4,
+            smooth=True,
+        )
 
         self.collator = DataCollatorForWholeWordMask(
             tokenizer=tokenizer,
@@ -66,18 +71,30 @@ class VTGHandle(BaseHandle):
         Called at the end of the validation epoch.
         """
         bleu = self.bleu.compute()
+        bleu4 = self.blue4.compute()
         module.log("val_generate_bleu", bleu, prog_bar=True, sync_dist=True)
+        module.log("val_generate_bleu4", bleu4, prog_bar=True, sync_dist=True)
+
+        self.blue4.reset()
         self.bleu.reset()
 
         if self.extended_bleu._update_count > 0:
             extended_bleu = self.extended_bleu.compute()
+            extended_bleu4 = self.extended_bleu4.compute()
             module.log(
                 "val_generate_extended_bleu",
                 extended_bleu,
                 prog_bar=True,
                 sync_dist=True,
             )
+            module.log(
+                "val_generate_extended_bleu4",
+                extended_bleu4,
+                prog_bar=True,
+                sync_dist=True,
+            )
         self.extended_bleu.reset()
+        self.extended_bleu4.reset()
 
     def tokenize(self, text: List[str], tokenizer, device, use_mask=True):
         """
@@ -85,13 +102,17 @@ class VTGHandle(BaseHandle):
         """
         labels_ids = []
         input_ids = []
+        soft_prompt_ids = tokenizer.convert_tokens_to_ids(
+            tokenizer.soft_prompt_tokens,
+        )
+
         for setence in text:
             tokenized = tokenizer.tokenize(
                 setence,
             )
             tokenized = tokenizer.convert_tokens_to_ids(tokenized)
             label = tokenized + [tokenizer.eos_token_id]
-            intput = [tokenizer.bos_token_id] + tokenized
+            intput = soft_prompt_ids + [tokenizer.bos_token_id] + tokenized
 
             labels_ids.append(label)
             input_ids.append(intput)
@@ -110,13 +131,11 @@ class VTGHandle(BaseHandle):
             return_attention_mask=True,
         )
 
-        assert input_outputs["attention_mask"] == label_outputs["attention_mask"], (
-            "Attention mask should be the same for input and label"
-        )
-
         return (
-            torch.LongTensor(input_outputs["input_ids"]).to(device),
-            torch.LongTensor(label_outputs["input_ids"]).to(device),
+            torch.LongTensor(input_outputs["input_ids"]).to(
+                device
+            ),  # (B, num_soft_prompt_token + 1+ L)
+            torch.LongTensor(label_outputs["input_ids"]).to(device),  # (B, L + 1)
             torch.LongTensor(input_outputs["attention_mask"]).to(
                 device
             ),  # (B), text length
@@ -177,6 +196,7 @@ class VTGHandle(BaseHandle):
     ):
         B, T, C = visual_features.shape
         B, L = text_ids.shape
+        AVAILABLE_LENGTH = L - module.num_soft_prompt_token
 
         # create mask for shared encoder
         padding_attention_casual = self.generate_padding_casual_attention_mask(
@@ -201,8 +221,8 @@ class VTGHandle(BaseHandle):
         )
 
         visual_features = bert_output.hidden_states[-1][:, :-L, :]
-        textaul_embeddings = bert_output.hidden_states[-1][:, -L:, :]
-        text_logits = bert_output.logits
+        textaul_embeddings = bert_output.hidden_states[-1][:, -AVAILABLE_LENGTH:, :]
+        text_logits = bert_output.logits[:, -AVAILABLE_LENGTH:, :]
 
         return visual_features, textaul_embeddings, text_logits, text_attention_mask
 
@@ -265,8 +285,11 @@ class VTGHandle(BaseHandle):
 
             if "extended_texts" in batch:
                 self.extended_bleu.update([predicted], [batch["extended_texts"][b]])
+                self.extended_bleu4.update([predicted], [batch["extended_texts"][b]])
 
             if "original_text" in batch:
                 self.bleu.update([predicted], [[batch["original_text"][b]]])
+                self.blue4.update([predicted], [[batch["original_text"][b]]])
             else:
                 self.bleu.update([predicted], [[text[b]]])
+                self.blue4.update([predicted], [[text[b]]])
