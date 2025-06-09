@@ -49,6 +49,10 @@ def train(cfg: DictConfig) -> None:
         DebugCallback(),
     ]
 
+    cfg.data.datamodule.num_workers = (
+        1  # NOTE: set the number of workers for dataloader
+    )
+
     # NOTE: start training
     t = Trainer(
         accelerator="gpu",
@@ -63,6 +67,7 @@ def train(cfg: DictConfig) -> None:
         sync_batchnorm=True,
         precision="16-mixed",
         logger=None,
+        num_sanity_val_steps=0,
         # detect_anomaly=True,
     )
 
@@ -114,8 +119,8 @@ class DebugCallback(callbacks.Callback):
                 )
             else:
                 logging.info(f"Param {name} has no grad")
-        if trainer.global_step > 100:
-            trainer.should_stop = True
+        # if trainer.global_step > 100:
+        trainer.should_stop = True
 
         # NOTE: check nan
         for name, param in pl_module.named_parameters():

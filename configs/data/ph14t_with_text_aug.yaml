@@ -15,6 +15,8 @@ transforms:
       - _target_: data.transforms.RandomCropVideo
         height: 256
         width: 192
+      - _target_: data.transforms.RandomHorizontalFlipVideo
+        p: 0.5
       - _target_: data.transforms.NormalizeVideo
         max_pixel_value: 1.0
         mean: [0.485, 0.456, 0.406]
@@ -40,6 +42,9 @@ transforms:
         mean: [0.485, 0.456, 0.406]
         std: [0.229, 0.224, 0.225]
       - _target_: data.transforms.ToTensorVideo
+      - _target_: data.transforms.ExtendedPh14TTextAugmentation
+        extend_csv_dir: ${ph14t.extended_csv_dir}/train-augmented.csv
+        random_choice: false
 
   test: null # NOTE: same as the val
 

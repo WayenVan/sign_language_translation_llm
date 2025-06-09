@@ -27,12 +27,13 @@ class ExtendedPh14TTextAugmentation:
     Extended PH14T Text Augmentation with extended text data by DeekSeek API.
     """
 
-    def __init__(self, extend_csv_dir):
+    def __init__(self, extend_csv_dir, random_choice=True):
         self.extend_csv_dir = extend_csv_dir
         self.extended_df = pl.read_csv(
             self.extend_csv_dir,
             separator="|",
         ).select(["id", "text"])
+        self.random_choice = random_choice
 
     def __call__(self, data: dict) -> dict:
         original_text = data["text"]
@@ -46,8 +47,10 @@ class ExtendedPh14TTextAugmentation:
                 f"Extended text for id {data['id']} not found in {self.extend_csv_dir}"
             )
             selected_text = original_text
-        else:
+        elif self.random_choice:
             selected_text = np.random.choice(extended_texts)
+        else:
+            selected_text = original_text
 
         data["text"] = selected_text
         data["original_text"] = original_text

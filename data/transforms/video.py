@@ -4,6 +4,20 @@ import os
 import albumentations as A
 
 
+class RandomHorizontalFlipVideo:
+    """
+    Random Horizontal Flip for video, not that the parameters used inside the video is the same across the batch
+    """
+
+    def __init__(self, *args, **kwargs):
+        self.flip = A.HorizontalFlip(*args, **kwargs)
+
+    def __call__(self, data):
+        video = data["video"]
+        data["video"] = self.flip(images=video)["images"]
+        return data
+
+
 class RandomCropVideo:
     """
     Random Crop Resize for video, not that the parameters used inside the video is the same  across the batch
