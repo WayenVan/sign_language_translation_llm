@@ -21,3 +21,5 @@ connector:
 
 freezer:
   _target_: modules.FullFreezer
+
+num_soft_prompt_token: 10

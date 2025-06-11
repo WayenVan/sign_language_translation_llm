@@ -20,6 +20,8 @@ from modules.q_former.q_former import (
     BertOnlyMLMHead,
 )
 from transformers.models.bert import BertLMHeadModel as BertLMHeadModelFromHF
+from transformers.models.bert.configuration_bert import BertConfig
+from transformers.models.bert.tokenization_bert import BertTokenizer
 
 from .handles.vtg_handle import VTGHandle
 from .handles.vtm_handle import VTMHandle
@@ -79,6 +81,7 @@ class SLTModel(LightningModule):
 
     def _create_bert_shared_encoder(self, cross_attention_freq=2):
         self.num_query_token = self.cfg.modules.num_query_token
+        self.num_soft_prompt_token = self.cfg.modules.num_soft_prompt_token
 
         # setup q former configs
         self.bert_config = BertConfig.from_pretrained(
@@ -113,6 +116,19 @@ class SLTModel(LightningModule):
                 "eos_token": "[EOS]",
             }
         )
+        # add soft promtp tokens
+        soft_prompt_tokens = [
+            f"[SOFT_PROMPT_{i}]" for i in range(self.num_soft_prompt_token)
+        ]
+        self.tokenizer.add_special_tokens(
+            {"additional_special_tokens": soft_prompt_tokens}
+        )
+        self.tokenizer.soft_prompt_tokens = soft_prompt_tokens
+        self.tokenizer.soft_prompt_ids = self.tokenizer.convert_tokens_to_ids(
+            soft_prompt_tokens
+        )
+
+        # NOTE: add soft prompt tokens
         self.shared_encoder.resize_token_embeddings(self.tokenizer.vocab_size)
         new_vocab_size = len(self.tokenizer)
         pretrained_weights = self.shared_encoder.get_input_embeddings().weight
@@ -121,7 +137,7 @@ class SLTModel(LightningModule):
         # NOTE: createa a new embeeding layer for bert
         self.shared_encoder.bert.embeddings.word_embeddings = CustomEmbeddingLayer(
             old_vocab_size,
-            2,
+            2 + self.num_soft_prompt_token,
             self.hidden_size,
             padding_idx,
             pretrained_weights,
@@ -129,11 +145,14 @@ class SLTModel(LightningModule):
 
         # update vocab size
         self.vocab_size = new_vocab_size
-        assert self.vocab_size == self.bert_config.vocab_size + 2, (
+        assert (
+            self.vocab_size
+            == self.bert_config.vocab_size + 2 + self.num_soft_prompt_token
+        ), (
             f"Vocab size {self.vocab_size} does not match bert config vocab size {self.bert_config.vocab_size}"
         )
         # updatre config and create new output layer
-        self.bert_config.vocab_size = self.shared_encoder.config.vocab_size + 2
+        self.bert_config.vocab_size = self.vocab_size
         self.shared_encoder.cls = BertOnlyMLMHead(config=self.bert_config)
 
         # NOTE: freeze all the embedding model in the layer, but not the new one
@@ -367,18 +386,27 @@ class SLTModel(LightningModule):
         video_query_tokens = self.video_query_tokens.expand(B, -1, -1)
 
         with torch.no_grad():
-            # attention mask for the shared encoder
-            attn_mask = torch.ones(
-                B, self.num_query_token + 1, device=device, dtype=torch.long
-            )
-
             # Initialize generation state
             output = []
             if output_distribution:
                 distributions = []
             unfinished = torch.ones(B, dtype=torch.bool, device=device)
-            input = torch.full(
-                (B, 1), self.tokenizer.bos_token_id, device=device, dtype=torch.long
+            # input = torch.full(
+            #     (B, 1), self.tokenizer.bos_token_id, device=device, dtype=torch.long
+            # )
+            input = (
+                torch.LongTensor(
+                    self.tokenizer.soft_prompt_ids + [self.tokenizer.bos_token_id]
+                )
+                .unsqueeze(0)
+                .expand(B, -1)
+                .to(device)
+            )
+            attn_mask = torch.ones(
+                B,
+                input.shape[1] + self.num_query_token,
+                device=device,
+                dtype=torch.long,
             )
             for _ in range(max_length):
                 if not unfinished.any():
