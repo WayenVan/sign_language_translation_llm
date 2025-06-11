@@ -1,7 +1,7 @@
 defaults:
   - base_train
   - override modules: vitpose_base
-  - override data: ph14t_with_text_aug
+  # - override data: ph14t_with_text_aug
   - _self_
 
 debug: False

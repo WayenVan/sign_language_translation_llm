@@ -145,6 +145,7 @@ class VTGHandle(BaseHandle):
     def generate_padding_casual_attention_mask(
         num_video_queries,
         text_attention_mask,  # [B, L]
+        # num_soft_prompt_token=0,
     ):
         """
         Generate addtivie attention mask for the video and text sequences.
@@ -166,9 +167,14 @@ class VTGHandle(BaseHandle):
         casual_mask = F.pad(text_casual_mask, (0, 0, num_video_queries, 0), value=0)
         casual_mask = F.pad(casual_mask, (num_video_queries, 0, 0, 0), value=1)
 
-        return (
+        ret = (
             text_mask * casual_mask
         )  # (B, L + num_video_queries, L + num_video_queries)
+        # TODO: test this
+        #
+        # if num_soft_prompt_token > 0:
+        #     ret[:, :, -L : -L + num_soft_prompt_token] = 1
+        return ret
 
     @staticmethod
     def length_to_mask(lengths, max_length=None):
@@ -272,24 +278,21 @@ class VTGHandle(BaseHandle):
             generated = module.generate(
                 video_embeddings=visual_embeddings, video_length=v_length, max_length=50
             )
-            generated = generated.cpu().tolist()
+            predicteds = module.tokenizer.batch_decode(
+                generated, skip_special_tokens=True
+            )
 
-        for b in range(B):
-            indexs = generated[b]
-            try:
-                eos_index = indexs.index(module.tokenizer.eos_token_id)
-            except ValueError:
-                eos_index = len(indexs)
-            indexs = indexs[:eos_index]
-            predicted = module.tokenizer.decode(indexs, skip_special_tokens=True)
+            for b in range(B):
+                predicted = predicteds[b]
+                if "extended_texts" in batch:
+                    self.extended_bleu.update([predicted], [batch["extended_texts"][b]])
+                    self.extended_bleu4.update(
+                        [predicted], [batch["extended_texts"][b]]
+                    )
 
-            if "extended_texts" in batch:
-                self.extended_bleu.update([predicted], [batch["extended_texts"][b]])
-                self.extended_bleu4.update([predicted], [batch["extended_texts"][b]])
-
-            if "original_text" in batch:
-                self.bleu.update([predicted], [[batch["original_text"][b]]])
-                self.blue4.update([predicted], [[batch["original_text"][b]]])
-            else:
-                self.bleu.update([predicted], [[text[b]]])
-                self.blue4.update([predicted], [[text[b]]])
+                if "original_text" in batch:
+                    self.bleu.update([predicted], [[batch["original_text"][b]]])
+                    self.blue4.update([predicted], [[batch["original_text"][b]]])
+                else:
+                    self.bleu.update([predicted], [[text[b]]])
+                    self.blue4.update([predicted], [[text[b]]])

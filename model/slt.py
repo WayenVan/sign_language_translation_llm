@@ -358,9 +358,11 @@ class SLTModel(LightningModule):
         video_embeddings: Optional[torch.Tensor] = None,
         max_length: int = 30,
         output_distribution: bool = False,
-    ):
+        num_beams: int = 5,
+    ) -> tuple[torch.Tensor, torch.Tensor] | torch.Tensor:
         """
         @param video: (batch_size, seq_len, 3, h, w)
+        @param num_beams: Number of beams for beam search
         """
         if video is None and video_embeddings is None:
             raise ValueError("Either video or video_embeddings must be provided.")
@@ -385,79 +387,133 @@ class SLTModel(LightningModule):
         # video query
         video_query_tokens = self.video_query_tokens.expand(B, -1, -1)
 
-        with torch.no_grad():
-            # Initialize generation state
-            output = []
-            if output_distribution:
-                distributions = []
-            unfinished = torch.ones(B, dtype=torch.bool, device=device)
-            # input = torch.full(
-            #     (B, 1), self.tokenizer.bos_token_id, device=device, dtype=torch.long
+        # Initialize beam search
+        beam_scores = torch.zeros(B, num_beams, device=device)
+        beam_scores[:, 1:] = -1e9  # Initialize first beam as active
+        beam_scores = beam_scores.view(-1)
+
+        # Create initial input sequences
+        input_sequences = (
+            torch.LongTensor(
+                self.tokenizer.soft_prompt_ids + [self.tokenizer.bos_token_id]
+            )
+            .unsqueeze(0)
+            .expand(B * num_beams, -1)
+            .to(device)
+        )
+
+        # Expand video features for all beams
+        video_embeddings_beam = video_embeddings.unsqueeze(1).repeat(1, num_beams, 1, 1)
+        video_embeddings_beam = video_embeddings_beam.view(B * num_beams, T, -1)
+        video_attention_mask_beam = video_attention_mask.unsqueeze(1).repeat(
+            1, num_beams, 1
+        )
+        video_attention_mask_beam = video_attention_mask_beam.view(B * num_beams, -1)
+        video_query_tokens_beam = video_query_tokens.unsqueeze(1).repeat(
+            1, num_beams, 1, 1
+        )
+        video_query_tokens_beam = video_query_tokens_beam.view(
+            B * num_beams, self.num_query_token, -1
+        )
+
+        # Track finished beams
+        finished = torch.zeros(B * num_beams, dtype=torch.bool, device=device)
+
+        for step in range(max_length):
+            if finished.all():
+                break
+
+            # attn_mask = torch.ones(
+            #     B * num_beams,
+            #     self.num_query_token + input_sequences.shape[1],
+            #     device=device,
             # )
-            input = (
-                torch.LongTensor(
-                    self.tokenizer.soft_prompt_ids + [self.tokenizer.bos_token_id]
-                )
-                .unsqueeze(0)
-                .expand(B, -1)
-                .to(device)
+            attn_mask = VTGHandle.generate_padding_casual_attention_mask(
+                self.num_query_token,
+                torch.ones(B * num_beams, input_sequences.shape[1], device=device),
             )
-            attn_mask = torch.ones(
-                B,
-                input.shape[1] + self.num_query_token,
-                device=device,
-                dtype=torch.long,
+            logits = self.shared_encoder(
+                input_ids=input_sequences,
+                query_embeds=video_query_tokens_beam,
+                attention_mask=attn_mask,
+                encoder_hidden_states=video_embeddings_beam,
+                encoder_attention_mask=video_attention_mask_beam,
+            ).logits[:, -1, :]
+
+            # Calculate probabilities and scores
+            log_probs = torch.log_softmax(logits, dim=-1)
+            candidate_scores = beam_scores[:, None] + log_probs
+
+            # Reshape for beam selection
+            candidate_scores = candidate_scores.view(B, num_beams * self.vocab_size)
+            top_scores, top_indices = torch.topk(candidate_scores, num_beams, dim=1)
+
+            # Determine next tokens and beam indices
+            beam_indices = top_indices // self.vocab_size
+            token_indices = top_indices % self.vocab_size
+
+            # Update sequences
+            new_sequences = []
+            for b in range(B):
+                for n in range(num_beams):
+                    beam_idx = beam_indices[b, n].item()
+                    token_idx = token_indices[b, n].item()
+                    seq_idx = b * num_beams + beam_idx
+
+                    new_seq = torch.cat(
+                        [
+                            input_sequences[seq_idx],
+                            torch.tensor([token_idx], device=device),
+                        ]
+                    )
+                    new_sequences.append(new_seq)
+
+                    # Check if sequence is finished
+                    if token_idx == self.tokenizer.eos_token_id:
+                        finished[b * num_beams + n] = True
+
+            input_sequences = torch.stack(new_sequences)
+            beam_scores = top_scores.view(-1)
+
+        # Select best beams
+        beam_scores = beam_scores.view(B, num_beams)
+        best_beams = beam_scores.argmax(dim=1)
+        results = torch.stack(
+            [input_sequences[i * num_beams + best_beams[i]] for i in range(B)]
+        )
+
+        # If requested, compute output distributions for best beams
+        if output_distribution:
+            # Prepare input for distribution calculation
+            input_ids = results[:, :-1]  # Remove last token
+
+            # Create attention mask
+            # attn_mask = torch.ones(
+            #     B,
+            #     self.num_query_token + input_ids.shape[1],
+            #     device=device,
+            # )
+            attn_mask = VTGHandle.generate_padding_casual_attention_mask(
+                self.num_query_token, torch.ones(B, input_ids.shape[1], device=device)
             )
-            for _ in range(max_length):
-                if not unfinished.any():
-                    break
+            # Compute logits for entire sequence
+            logits = self.shared_encoder(
+                input_ids=input_ids,
+                query_embeds=video_query_tokens,
+                attention_mask=attn_mask,
+                encoder_hidden_states=video_embeddings,
+                encoder_attention_mask=video_attention_mask,
+            ).logits
 
-                # Forward pass
-                logits = self.shared_encoder(
-                    input_ids=input,
-                    query_embeds=video_query_tokens,
-                    attention_mask=attn_mask,
-                    encoder_hidden_states=video_embeddings,
-                    encoder_attention_mask=video_attention_mask,
-                ).logits  # [B, L, C]
-                logits = logits[:, -1, :]  # Get logits for the last token
-                # [B, C]
+            # Extract only the input token logits (after query tokens)
+            token_logits = logits[:, self.num_query_token :, :]
 
-                next_tokens = torch.argmax(logits, dim=-1)  # Greedy decoding
-                # [B ]
+            # Extract only the generated token positions
+            start_index = len(self.tokenizer.soft_prompt_ids)
+            generated_logits = token_logits[:, start_index:, :]
 
-                # Update unfinished sequences
-                unfinished = unfinished & (
-                    next_tokens.squeeze() != self.tokenizer.eos_token_id
-                )
-
-                # update output
-                output.append(next_tokens.unsqueeze(-1))  # [B, 1]
-
-                if output_distribution:
-                    distributions.append(logits.unsqueeze(1))  # [B, 1, C]
-
-                # Prepare next inputs
-                input = torch.cat((input, next_tokens.unsqueeze(-1)), dim=1)
-                attn_mask = torch.cat(
-                    (attn_mask, unfinished.unsqueeze(-1).long()), dim=1
-                )
-
-            # [B L]
-            results = (
-                torch.cat(output, dim=1)
-                if len(output) > 0
-                else torch.empty(B, 0, device=device)
-            )
-
-            if output_distribution:
-                distributions = (
-                    torch.cat(distributions, dim=1)
-                    if len(distributions) > 0
-                    else torch.empty(B, 0, self.vocab_size, device=device)
-                )
-                return results, distributions
-
+            return results, generated_logits
+        else:
             return results
 
 

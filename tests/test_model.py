@@ -59,8 +59,6 @@ def test_slt_model_generation():
     ).cuda()
     loader = data_module.train_dataloader()
     for i, batch in enumerate(loader):
-        if i < 8:
-            continue
         ids = batch["id"]
         video = batch["video"].to(model.device)
         video_length = batch["video_length"].to(model.device)

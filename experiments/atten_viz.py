@@ -7,65 +7,32 @@ from model.slt import SLTModel
 from data.ph14t import Ph14TDataModule
 from hydra import compose, initialize
 import torch
+from omegaconf import OmegaConf
 
 import seaborn as sns
 import matplotlib.pyplot as plt
 
 initialize(config_path="../configs")
+
 cfg = compose("initial_train")
 data_module = Ph14TDataModule(cfg)
 data_module.setup()
+
+model_cfg = OmegaConf.load("outputs/train/2025-06-09_16-42-39/.hydra/config.yaml")
 model = SLTModel.load_from_checkpoint(
-    "/root/projects/slt_set_llms/outputs/train/2025-05-20_23-18-04/last.ckpt",
-    cfg=cfg,
+    "outputs/train/2025-06-09_16-42-39/iftai1w1-epoch=72-val_generate_bleu=0.2172.ckpt",
+    cfg=model_cfg,
 ).cuda()
-loader = data_module.train_dataloader()
+loader = data_module.val_dataloader()
 
-# handle = model.handles["vtg"]
-# for batch in loader:
-#     with torch.no_grad():
-#         ids, video, video_length, text = handle.dispatch_batch(batch, model.device)
-#         text_ids, labels, text_length = handle.tokenize(
-#             text, model.tokenizer, model.device
-#         )
-#         _, atten = handle._forward(
-#             model, video, video_length, text_ids, text_length, output_attentions=True
-#         )
-#     break
-#
-# # atten = list([batch, heads, from sequence, to sequence])
-# atten = atten[-1][0].mean(dim=0)
-# atten = atten[128:, :]
-# atten = atten.cpu().numpy()
-#
-# sns.heatmap(atten, cmap="viridis")
-# plt.tight_layout()
-# plt.savefig("outputs/atten.png")
-
-# --------------------------------------------------------
-#
-handle = model.handles["vtg"]
-for batch in loader:
-    with torch.no_grad():
-        ids, video, video_length, text = handle.dispatch_batch(batch, model.device)
-        text_ids, labels, text_length = handle.tokenize(
-            text, model.tokenizer, model.device, use_mask=True
-        )
-        out_logit, atten = handle._forward(
-            model,
-            video,
-            video_length,
-            text_ids,
-            text_length,
-            output_attentions=True,
-        )
-    break
-
-# atten = list([batch, heads, from sequence, to sequence])
-atten = atten[-1][0].mean(dim=0)
-# atten = atten[128:, :]
-atten = atten.cpu().numpy()
-
-sns.heatmap(atten, cmap="viridis")
-plt.tight_layout()
-plt.savefig("outputs/atten_mask.png")
+for i, batch in enumerate(loader):
+    generated = model.generate(
+        batch["video"].cuda(),
+        batch["video_length"].cuda(),
+        max_length=50,
+        num_beams=5,
+    )
+    decoded = model.tokenizer.batch_decode(generated, skip_special_tokens=True)
+    # decoded = [d[10:] for d in decoded]  # Skip the <s> token
+    print("Original:", batch["text"])
+    print("Generated:", decoded)
