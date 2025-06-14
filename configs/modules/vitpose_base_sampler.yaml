@@ -1,0 +1,25 @@
+visual_encoder:
+  _target_: modules.VitPoseVisualEncoder
+  id: usyd-community/vitpose-plus-base
+  hidden_states_layer: -2
+
+visual_adapter:
+  _target_: modules.VisualSampleAdapter
+  hidden_size: 768
+  target_hidden_size: 768
+  num_heads: 6
+  num_layers: 2
+  num_extra_queries: 8
+
+bert_shared_encoder_id: dbmdz/bert-base-german-europeana-cased
+num_query_token: 64
+
+connector:
+  _target_: modules.LinearConnector
+  in_features: 768
+  out_features: 2560
+
+freezer:
+  _target_: modules.FullFreezer
+
+num_soft_prompt_token: 10

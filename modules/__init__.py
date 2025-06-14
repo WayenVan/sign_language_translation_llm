@@ -12,9 +12,11 @@ from .linear_connector.linear_connector import LinearConnector
 from .spatial_temporal_adapter.spatial_temporal_adapter import SpatialTemporalAdapter
 from .sapeins_encoder.sapeins_encoder import SapeinsVisualEncoder
 from .freezer import FullFreezer, NoFreezer
+from .token_sampler_adapter.token_sampler_adapter import VisualSampleAdapter
 
 
 __all__ = [
+    "VisualSampleAdapter",
     "FullFreezer",
     "NoFreezer",
     "SapeinsVisualEncoder",
