@@ -19,26 +19,69 @@ import torch
 from model.slt import SLTModel
 import cv2
 
+import datetime
 
 from misc.git_utils import save_git_info
 from typing import Any, Dict
 
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-logger = logging.getLogger(__name__)  # NOTE: hydra already setupo the logger for us
 cv2.setNumThreads(0)  # NOTE: set the number of threads to 0 to avoid cv2 error
+
+local_rank = int(os.environ.get("LOCAL_RANK", "0"))
+global_rank = int(os.environ.get("RANK", "0"))
+logger = logging.getLogger(__name__)
 
 
 # NOTE: the hydra appp only inisitalize once
 @hydra.main(config_path="../configs", config_name="initial_train", version_base="1.3.2")
 def main(cfg: DictConfig) -> None:
-    train(cfg)
-
-
-def train(cfg: DictConfig) -> None:
     hydra_config = hydra.core.hydra_config.HydraConfig.get()
-    output_dir = hydra_config.runtime.output_dir
+    train(cfg, hydra_config)
+
+
+def init_output_dir(config_name: str) -> str:
+    """
+    Initialize the output directory for the job.
+    """
+    now = datetime.datetime.now()
+    subfolder = now.strftime("%Y-%m-%d_%H-%M-%S")
+    output_dir = os.path.join("outputs", config_name, subfolder)
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+    return output_dir
+
+
+def init_logger(local_rank, output_dir: str) -> WandbLogger:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        handlers=[
+            logging.StreamHandler(),  # Stream handler for console output
+            logging.FileHandler(
+                os.path.join(output_dir, f"train_rank{local_rank}.log")
+            ),  # File handler for logging to a file
+        ],
+    )
+    return logging.getLogger(__name__)
+
+
+def train(
+    cfg: DictConfig,
+    hydra_config: DictConfig,
+) -> None:
     config_name = hydra_config.job.config_name
 
+    # NOTE: set the output directory
+    output_dir = os.environ.get(
+        config_name.upper() + "_OUTPUT_DIR",
+        None,
+    )
+    if output_dir is None:
+        print(f"Output directory not found in environment variables, initializing...")
+        output_dir = init_output_dir(config_name)
+        os.environ[config_name.upper() + "_OUTPUT_DIR"] = output_dir
+
+    init_logger(local_rank, output_dir)
     logger.info(f"Output directory: {output_dir}")
 
     # NOTE: set the logger
@@ -77,7 +120,7 @@ def train(cfg: DictConfig) -> None:
         gradient_clip_val=1.0,  # NOTE: gradient clipping will be normed
         # gradient_clip_algorithm="value",
         sync_batchnorm=True,
-        precision="16-mixed",
+        precision=cfg.precision,
         logger=lt_logger,
         # WARN: will slow down the training process, just for debug now
         # detect_anomaly=True,

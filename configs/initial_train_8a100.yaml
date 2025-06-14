@@ -1,23 +1,25 @@
 defaults:
   - base_train
-  - override modules: vitpose_base
-  - override data: ph14t_with_text_aug
+  # - override data: ph14t_with_text_aug
+  - override modules: vitpose_base_sampler
+  # - override engine: cosine_anneal
   - _self_
 
 debug: False
-max_epochs: 400
-devices: [0]
+max_epochs: 65
+devices: [2, 3, 4, 5, 6, 7]
+precision: bf16-mixed
 
 data:
-  batch_size: 8
+  batch_size: 12
   batch_size_val_test: 4
   datamodule:
-    num_workers: 12
+    num_workers: 6
 
 engine:
   lr_scheduler:
-    step_size: 50
-  optmizer:
+    step_size: 25
+  optimizer:
     lr: 1e-4
 
 vtg_flag: True

@@ -2,11 +2,17 @@ defaults:
   - modules: default
   - engine: default
   - data: ph14t_keywords
+  # - override hydra/launcher: joblib
+  - override hydra/hydra_logging: disabled
+  - override hydra/job_logging: disabled
   - _self_
 
 hydra:
   run:
-    dir: outputs/${hydra.job.name}/${now:%Y-%m-%d_%H-%M-%S}
+    dir: .
+  sweep:
+    dir: .
+  output_subdir: null
 
 max_epochs: 100
 debug: True
