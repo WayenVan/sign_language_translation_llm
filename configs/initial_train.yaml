@@ -17,7 +17,7 @@ data:
 engine:
   lr_scheduler:
     step_size: 100
-  optmizer:
+  optimizer:
     lr: 1e-4
 
 vtg_flag: True
