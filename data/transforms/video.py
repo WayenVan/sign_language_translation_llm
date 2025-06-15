@@ -100,6 +100,17 @@ class ToGpuVideo:
             )
 
 
+class UniGapSampleVideo:
+    def __init__(self, gap=2):
+        self.gap = gap
+
+    def __call__(self, data):
+        video = data["video"]
+        video = video[:: self.gap]
+        data["video"] = video
+        return data
+
+
 class UniformSampleVideo:
     def __init__(self, target_len=128):
         self.target_len = target_len

@@ -7,6 +7,7 @@ from .video import (
     ToGpuVideo,
     UniformSampleVideo,
     RandomHorizontalFlipVideo,
+    UniGapSampleVideo,
 )
 
 from .text import (
@@ -15,6 +16,7 @@ from .text import (
 )
 
 __all__ = [
+    "UniGapSampleVideo",
     "RandomHorizontalFlipVideo",
     "RandomWordAugmentation",
     "ExtendedPh14TTextAugmentation",

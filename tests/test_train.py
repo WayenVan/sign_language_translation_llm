@@ -78,7 +78,7 @@ def train(
         None,
     )
     if output_dir is None:
-        print(f"Output directory not found in environment variables, initializing...")
+        print("Output directory not found in environment variables, initializing...")
         output_dir = init_output_dir(config_name)
         os.environ[config_name.upper() + "_OUTPUT_DIR"] = output_dir
 
@@ -97,7 +97,7 @@ def train(
     t = Trainer(
         accelerator="gpu",
         strategy="ddp_find_unused_parameters_true",
-        devices=[7, 6],
+        devices=[0],
         callbacks=cbs,
         log_every_n_steps=50,
         max_epochs=cfg.max_epochs,
@@ -179,4 +179,3 @@ class DebugCallback(callbacks.Callback):
 
 if __name__ == "__main__":
     main()
-
