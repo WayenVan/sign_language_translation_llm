@@ -1,0 +1,25 @@
+visual_encoder:
+  _target_: modules.VitPoseLoraVisualEncoder
+  id: usyd-community/vitpose-plus-base
+  hidden_states_layer: -2
+  lora_rank: 8
+  lora_alpha: 8
+  lora_dropout: 0.1
+  start_lora_layer: 8
+
+visual_adapter:
+  _target_: modules.VisualSampleAdapter
+  hidden_size: 768
+  target_hidden_size: 768
+  num_heads: 6
+  num_layers: 2
+  num_extra_queries: 4
+
+bert_shared_encoder_id: dbmdz/bert-base-german-europeana-cased
+num_query_token: 64
+
+freezer:
+  _target_: modules.LoraFreezer
+  freeze_adapter: False
+
+num_soft_prompt_token: 10

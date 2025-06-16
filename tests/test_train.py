@@ -29,7 +29,6 @@ cv2.setNumThreads(0)  # NOTE: set the number of threads to 0 to avoid cv2 error
 
 local_rank = int(os.environ.get("LOCAL_RANK", "0"))
 global_rank = int(os.environ.get("RANK", "0"))
-logger = logging.getLogger(__name__)
 
 
 # NOTE: the hydra appp only inisitalize once
@@ -47,13 +46,13 @@ def init_output_dir(config_name: str) -> str:
     """
     now = datetime.datetime.now()
     subfolder = now.strftime("%Y-%m-%d_%H-%M-%S")
-    output_dir = os.path.join("outputs", config_name, subfolder)
+    output_dir = os.path.join("outputs", config_name + "test", subfolder)
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
     return output_dir
 
 
-def init_logger(local_rank, output_dir: str) -> WandbLogger:
+def init_logger(local_rank, output_dir: str):
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -64,7 +63,6 @@ def init_logger(local_rank, output_dir: str) -> WandbLogger:
             ),  # File handler for logging to a file
         ],
     )
-    return logging.getLogger(__name__)
 
 
 def train(
@@ -83,12 +81,13 @@ def train(
         os.environ[config_name.upper() + "_OUTPUT_DIR"] = output_dir
 
     init_logger(local_rank, output_dir)
+    logger = logging.getLogger(__name__)
     logger.info(f"Output directory: {output_dir}")
 
     # NOTE: define callbacks for trainer
     cbs = [
         callbacks.RichProgressBar(),
-        # DebugCallback(),
+        DebugCallback(),
     ]
 
     cfg.data.datamodule.num_workers = 1
@@ -128,6 +127,18 @@ class DebugCallback(callbacks.Callback):
     def __init__(self):
         super().__init__()
         self.current_train_batch = None
+        self.logger = logging.getLogger("debug_callback")
+
+    def on_train_start(
+        self, trainer: pl.Trainer, pl_module: pl.LightningModule
+    ) -> None:
+        for name, param in pl_module.named_parameters():
+            self.logger.info(
+                f"Parameter {name} - requires_grad: {param.requires_grad}, shape: {param.shape}, mean: {param.mean()}, std: {param.std()}"
+            )
+        self.logger.info(
+            f"Training started with model: {pl_module.__class__.__name__}, global rank: {trainer.global_rank}, local rank: {trainer.local_rank}"
+        )
 
     def on_train_batch_start(
         self,
@@ -141,17 +152,18 @@ class DebugCallback(callbacks.Callback):
     def on_before_backward(
         self, trainer: "pl.Trainer", pl_module: "pl.LightningModule", loss: torch.Tensor
     ) -> None:
-        # NOTE: check the loss
-        if torch.isnan(loss).any():
-            video = self.current_train_batch["video"]
-            ids = self.current_train_batch["ids"]
-
-            logger.warning(f"Loss is NaN: {loss}")
-            logger.warning(
-                f"Video shape: {video.shape}, mean: {video.mean()}, std: {video.std()}"
-            )
-            logger.warning(f"input_ids: {ids}")
-            # trainer.should_stop = True
+        pass
+        # # NOTE: check the loss
+        # if torch.isnan(loss).any():
+        #     video = self.current_train_batch["video"]
+        #     ids = self.current_train_batch["ids"]
+        #
+        #     logger.warning(f"Loss is NaN: {loss}")
+        #     logger.warning(
+        #         f"Video shape: {video.shape}, mean: {video.mean()}, std: {video.std()}"
+        #     )
+        #     logger.warning(f"input_ids: {ids}")
+        # trainer.should_stop = True
 
     def on_before_optimizer_step(
         self,
@@ -160,18 +172,10 @@ class DebugCallback(callbacks.Callback):
         optimizer: Any,
     ) -> None:
         nan_flag = False
-        for name, param in pl_module.named_parameters():
-            global_step = trainer.global_step
-
-            if torch.isnan(param).any():
-                nan_flag = True
-                logger.warning(
-                    f"In Step {global_step}, Param {name} has mean: {param.mean()}, std: {param.std()}"
-                )
-            if param.grad is not None and torch.isnan(param.grad).any():
-                nan_flag = True
-                logger.warning(
-                    f"In Step {global_step}, Param {name} has grad mean: {param.grad.mean()}, std: {param.grad.std()}"
+        if trainer.is_global_zero:
+            for name, param in pl_module.named_parameters():
+                self.logger.info(
+                    f"Parameter {name} - requires_grad: {param.requires_grad}, grad: {param.grad is not None or None}, mean: {param.mean()}, std: {param.std()}"
                 )
 
         return

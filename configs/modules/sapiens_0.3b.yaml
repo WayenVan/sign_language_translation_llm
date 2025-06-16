@@ -5,7 +5,7 @@ visual_encoder:
   hidden_states_layer: -2
 
 visual_adapter:
-  _target_: modules.VisualAdapter
+  _target_: modules.VisualSampleAdapter
   hidden_size: 1024
   target_hidden_size: 768
   num_heads: 8
@@ -24,4 +24,4 @@ connector:
 freezer:
   _target_: modules.FullFreezer
 
-num_soft_prompt_token: 10
+num_soft_prompt_token: 2
