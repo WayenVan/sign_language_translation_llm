@@ -5,7 +5,7 @@ visual_encoder:
   hidden_states_layer: -2
 
 visual_adapter:
-  _target_: modules.VisualSampleAdapter
+  _target_: modules.VisualAdapter
   hidden_size: 1024
   target_hidden_size: 768
   num_heads: 8
@@ -15,12 +15,6 @@ visual_adapter:
 bert_shared_encoder_id: dbmdz/bert-base-german-europeana-cased
 num_query_token: 64
 
-connector:
-  _target_: modules.LinearConnector
-  in_features: 768
-  out_features: 1024 #gemma3 1b
-  # out_features: 2560 #gemma3 1b
-  #
 freezer:
   _target_: modules.FullFreezer
 

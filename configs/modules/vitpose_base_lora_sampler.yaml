@@ -2,8 +2,8 @@ visual_encoder:
   _target_: modules.VitPoseLoraVisualEncoder
   id: usyd-community/vitpose-plus-base
   hidden_states_layer: -2
-  lora_rank: 8
-  lora_alpha: 8
+  lora_rank: 4
+  lora_alpha: 4
   lora_dropout: 0.1
   start_lora_layer: 8
 

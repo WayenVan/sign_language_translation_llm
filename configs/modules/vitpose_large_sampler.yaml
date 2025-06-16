@@ -1,23 +1,20 @@
 visual_encoder:
   _target_: modules.VitPoseVisualEncoder
-  id: usyd-community/vitpose-plus-base
+  id: usyd-community/vitpose-plus-large
   hidden_states_layer: -2
+  # hidden layers 24
+# https://huggingface.co/usyd-community/vitpose-plus-large/blob/main/config.json
 
 visual_adapter:
   _target_: modules.VisualSampleAdapter
-  hidden_size: 768
+  hidden_size: 1024
   target_hidden_size: 768
-  num_heads: 6
+  num_heads: 8
   num_layers: 2
   num_extra_queries: 4
 
 bert_shared_encoder_id: dbmdz/bert-base-german-europeana-cased
 num_query_token: 64
-
-connector:
-  _target_: modules.LinearConnector
-  in_features: 768
-  out_features: 2560
 
 freezer:
   _target_: modules.FullFreezer
