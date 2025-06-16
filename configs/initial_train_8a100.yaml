@@ -41,6 +41,9 @@ vtm_mask_replace_prob: 0.6
 
 vtc_flag: True
 vtc_weight: 1.0
+vtc_fine_grain_weight: 1.0
+vtc_temperature_fine_grain: 0.07
+vtc_top_k: 5
 
 ph14t:
   extended_csv_dir: outputs/ph14t_text_augmented

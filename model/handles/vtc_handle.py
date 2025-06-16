@@ -17,7 +17,10 @@ class VTCHandle(BaseHandle):
     def __init__(self, hiddent_size, cfg):
         super().__init__()
         self.loss_weight = cfg.vtc_weight
+        self.fine_grain_loss_weight = cfg.vtc_fine_grain_weight
         self.hiddent_size = hiddent_size
+        self.temperature_fine_grain = cfg.vtc_temperature_fine_grain
+        self.top_k = cfg.vtc_top_k
         # self.queue_max_size = cfg.vtc_queue_max_size
         # self.queue_initialized = False
 
@@ -149,9 +152,16 @@ class VTCHandle(BaseHandle):
 
         visual_features = bert_output.hidden_states[-1][:, :-L, :]
         textaul_embeddings = bert_output.hidden_states[-1][:, -L, :]
+        textauL_embedding_fine_grain = bert_output.hidden_states[-1][:, -L + 1 :, :]
         text_logits = bert_output.logits
 
-        return visual_features, textaul_embeddings, text_logits, text_attention_mask
+        return (
+            visual_features,
+            textaul_embeddings,
+            text_logits,
+            text_attention_mask,
+            textauL_embedding_fine_grain,
+        )
 
     def contrastive_loss(
         self, module: LightningModule, visual_features, text_features, label_smooth=0.1
@@ -208,11 +218,52 @@ class VTCHandle(BaseHandle):
             ) / 2.0
         return loss
 
+    def fine_grain_contrastive(self, video, video_length, text, text_mask):
+        """
+        Compute contrastive loss between from video to text, the text is detached
+        Args:
+            video: Video embeddings of shape (B, T, D)
+            video_length: Lengths of video sequences of shape (B,)
+            text: Text embeddings of shape (B, L, D)
+            text_mask: Attention mask for text of shape (B, L)
+        """
+
+        video_feats = torch.nn.functional.normalize(video, dim=-1, p=2)
+        text_feats = torch.nn.functional.normalize(text, dim=-1, p=2).detach()
+        video_mask = self.length_to_mask(
+            video_length, max_length=video_feats.size(1)
+        )  # (B, T)
+        padding_mask = video_mask.unsqueeze(2)  # (B, T, L)
+        padding_mask = padding_mask.float()  # Convert to float for masking
+        padding_mask = padding_mask.masked_fill(
+            padding_mask == 0, float("-inf")
+        )  # Set padding to -inf
+        padding_mask = padding_mask.masked_fill(
+            padding_mask == 1, 0.0
+        )  # Set non-padding to 0.0
+
+        similarity = (
+            torch.bmm(video_feats, text_feats.transpose(1, 2))
+            / self.temperature_fine_grain
+        )  # (B, T, L)
+        similarity = similarity + padding_mask  # Apply padding mask
+        similarity = torch.log_softmax(similarity, dim=-2)  # Log softmax
+
+        value, indeces = torch.topk(
+            similarity, k=self.top_k, dim=-2
+        )  # Get top-k indices, (B, 5, L)
+        mask = torch.zeros_like(similarity, dtype=torch.float)  # (B, T, L)
+        mask.scatter_(-2, indeces, 1.0)  # Set top-k indices to 1
+        mask = mask * text_mask.unsqueeze(1).float()  # Apply text mask
+
+        loss = -(similarity * mask).sum(dim=-2).mean()  # Compute loss
+        return loss
+
     def train_step(self, module, batch, batch_idx, visual_embeddings, v_length):
         ids, _, _, text = self.dispatch_batch(batch, module.device)
         text_ids, text_mask = self.tokenize(text, module.tokenizer, module.device)
 
-        visual_features, text_features, _, _ = self._forward(
+        visual_features, text_features, _, _, text_fine_grain_features = self._forward(
             module, visual_embeddings, v_length, text_ids, text_mask
         )
 
@@ -221,6 +272,19 @@ class VTCHandle(BaseHandle):
             * self.loss_weight
         )
         module.log("train_contrastive_loss", target_loss, prog_bar=True)
+
+        fine_grain_loss = (
+            self.fine_grain_contrastive(
+                visual_embeddings,
+                v_length,
+                text_fine_grain_features,
+                text_mask[:, 1:],  # remove cls token
+            )
+            * self.fine_grain_loss_weight
+        )
+        module.log("train_fine_grain_loss", fine_grain_loss, prog_bar=True)
+
+        target_loss += fine_grain_loss
         return target_loss
 
     def validation_step(self, module, batch, batch_idx, visual_embeddings, v_length):

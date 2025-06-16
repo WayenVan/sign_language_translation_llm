@@ -87,7 +87,7 @@ def train(
     # NOTE: define callbacks for trainer
     cbs = [
         callbacks.RichProgressBar(),
-        DebugCallback(),
+        # DebugCallback(),
     ]
 
     cfg.data.datamodule.num_workers = 1
@@ -96,7 +96,7 @@ def train(
     t = Trainer(
         accelerator="gpu",
         strategy="ddp_find_unused_parameters_true",
-        devices=[0],
+        devices=[2],
         callbacks=cbs,
         log_every_n_steps=50,
         max_epochs=cfg.max_epochs,
@@ -107,6 +107,7 @@ def train(
         logger=None,
         # WARN: will slow down the training process, just for debug now
         # detect_anomaly=True,
+        num_sanity_val_steps=0,
     )
 
     if t.is_global_zero:

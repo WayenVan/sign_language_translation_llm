@@ -17,7 +17,7 @@ def length_to_mask(lengths, max_length=None):
     return mask.long()  # (B, max_length)
 
 
-def contrastive_loss(video, video_length, text, text_mask):
+def contrastive_loss(video, video_length, text, text_mask, top_k=5, temperature=0.1):
     """
     Compute contrastive loss between video and text embeddings.
     Args:
@@ -39,11 +39,15 @@ def contrastive_loss(video, video_length, text, text_mask):
         padding_mask == 1, 0.0
     )  # Set non-padding to 0.0
 
-    similarity = torch.bmm(video_feats, text_feats.transpose(1, 2))  # (B, T, L)
+    similarity = (
+        torch.bmm(video_feats, text_feats.transpose(1, 2)) / temperature
+    )  # (B, T, L)
     similarity = similarity + padding_mask  # Apply padding mask
     similarity = torch.log_softmax(similarity, dim=-1)  # Log softmax
 
-    value, indeces = torch.topk(similarity, k=5, dim=-2)  # Get top-k indices, (B, 5, L)
+    value, indeces = torch.topk(
+        similarity, k=top_k, dim=-2
+    )  # Get top-k indices, (B, 5, L)
     mask = torch.zeros_like(similarity, dtype=torch.float)  # (B, T, L)
     mask.scatter_(-2, indeces, 1.0)  # Set top-k indices to 1
 

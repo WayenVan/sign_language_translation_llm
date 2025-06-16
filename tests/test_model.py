@@ -28,13 +28,13 @@ def test_slt_model():
     import polars as pl
 
     initialize(config_path="../configs")
-    cfg = compose("initial_train")
+    cfg = compose("initial_train_8a100")
     cfg.data.batch_size = 2
     data_module = Ph14TDataModule(cfg)
     data_module.setup()
     model = SLTModel(
         cfg=cfg,
-    ).cuda()
+    ).cuda(0)
     loader = data_module.train_dataloader()
     for i, batch in enumerate(loader):
         with torch.autocast("cuda"):
@@ -79,6 +79,6 @@ def test_slt_model_generation():
 
 
 if __name__ == "__main__":
-    # test_slt_model()
+    test_slt_model()
     # test_slt_model_inspect()
-    test_slt_model_generation()
+    # test_slt_model_generation()
