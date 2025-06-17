@@ -4,14 +4,14 @@ visual_encoder:
   hidden_states_layer: -2
 
 visual_adapter:
-  _target_: modules.VisualSampleAdapter
+  _target_: modules.VisualAdapter
   hidden_size: 768
-  target_hidden_size: 768
+  target_hidden_size: 1024
   num_heads: 6
   num_layers: 2
-  num_extra_queries: 4
+  num_extra_queries: 8
 
-bert_shared_encoder_id: dbmdz/bert-base-german-europeana-cased
+bert_shared_encoder_id: google-bert/bert-large-uncased
 num_query_token: 64
 
 freezer:

@@ -1,6 +1,6 @@
 from lightning import LightningModule
 from transformers import AutoTokenizer
-from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf
 from hydra.utils import instantiate
 from typing import Dict, Any, Optional
 import logging
@@ -9,6 +9,7 @@ import numpy as np
 import os
 import shutil
 import polars as pl
+from transformers import get_scheduler
 
 
 # from modules.fsmt.modeling_fsmt import FSMTForConditionalGeneration
@@ -327,8 +328,28 @@ class SLTModel(LightningModule):
                 {"params": filter(lambda p: p.requires_grad, self.parameters())},
             ],
         )
-        scheduler = instantiate(self.cfg.engine.lr_scheduler, opt)
-        return {"optimizer": opt, "lr_scheduler": scheduler}
+
+        # scheduler = instantiate(self.cfg.engine.lr_scheduler, opt)
+        kwarges = self.cfg.engine.lr_scheduler.kwargs
+        if kwarges is None:
+            kwarges = {}
+        else:
+            kwarges = OmegaConf.to_container(kwarges, resolve=True)
+
+        scheduler = get_scheduler(
+            self.cfg.engine.lr_scheduler.name,
+            opt,
+            num_warmup_steps=self.cfg.engine.lr_scheduler.warmup_steps,
+            num_training_steps=self.cfg.engine.lr_scheduler.training_steps,
+            scheduler_specific_kwargs=kwarges,
+        )
+        return {
+            "optimizer": opt,
+            "lr_scheduler": {
+                "scheduler": scheduler,
+                "interval": "epoch",  # or 'epoch'
+            },
+        }
 
     def on_save_checkpoint(self, checkpoint: Dict[str, Any]) -> None:
         for name in list(checkpoint.keys()):
