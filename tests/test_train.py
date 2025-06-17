@@ -17,6 +17,7 @@ import lightning.pytorch as pl
 import torch
 
 from model.slt import SLTModel
+from model.slt_vision_pretrain import SignBackboneForVPretraining
 import cv2
 
 import datetime
@@ -33,7 +34,7 @@ global_rank = int(os.environ.get("RANK", "0"))
 
 # NOTE: the hydra appp only inisitalize once
 @hydra.main(
-    config_path="../configs", config_name="initial_train_8a100", version_base="1.3.2"
+    config_path="../configs", config_name="siam_train_8a100", version_base="1.3.2"
 )
 def main(cfg: DictConfig) -> None:
     hydra_config = hydra.core.hydra_config.HydraConfig.get()
@@ -118,8 +119,8 @@ def train(
 
     logger.info(f"Process in local rank {t.local_rank}, global rank {t.global_rank}")
 
-    datamodule = instantiate(cfg.data.datamodule, cfg)
-    model = SLTModel(cfg)
+    datamodule = instantiate(cfg.data.datamodule.instance, cfg)
+    model = SignBackboneForVPretraining(cfg)
     t.fit(model, datamodule=datamodule)
 
 

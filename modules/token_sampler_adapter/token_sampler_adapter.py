@@ -11,11 +11,10 @@ from timm.models.vision_transformer import (
 )
 
 
-class VisualSampleAdapter(nn.Module):
+class TokenSampleAdapter(nn.Module):
     def __init__(
         self,
         hidden_size,
-        target_hidden_size,
         num_heads,
         num_layers,
         num_extra_queries,
@@ -46,10 +45,8 @@ class VisualSampleAdapter(nn.Module):
                 for _ in range(num_layers)
             ]
         )
-        self.linear = nn.Linear(hidden_size, target_hidden_size)
-        self.positional_embedding = nn.Embedding(max_length, target_hidden_size)
 
-    def forward(self, x, v_length):
+    def forward(self, x):
         # x: (B, T, HW, C)
         B, T, HW, C = x.shape
         x = rearrange(x, "b t hw c -> (b t) hw c")
@@ -60,23 +57,8 @@ class VisualSampleAdapter(nn.Module):
 
         extra_queries = rearrange(extra_queries, "(b t) n c -> b t n c", b=B, t=T)
 
-        position_ids = (
-            torch.arange(T, device=x.device).unsqueeze(0).expand(B, -1)
-        )  # (B, T)
-        position_embeddings = self.positional_embedding(
-            position_ids
-        )  # (B, T, Target_hidden_size)
-        position_embeddings = repeat(
-            position_embeddings, "b t c -> b t n c", n=self.num_extra_queries
-        )
-        feats = self.linear(extra_queries) + position_embeddings
-        feats = rearrange(feats, "b t n c -> b (t n) c")  # (B, T, num_extra_queries, C)
-
-        v_length = (
-            v_length * self.num_extra_queries
-        )  # Adjust v_length for extra queries
-
-        return feats, v_length
+        feats = extra_queries.mean(dim=2)
+        return feats
 
 
 class Block(nn.Module):

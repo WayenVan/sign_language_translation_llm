@@ -14,16 +14,18 @@ from .linear_connector.linear_connector import LinearConnector
 from .stc_dapter.stc_adapter import SpatialTemporalAdapter
 from .sapeins_encoder.sapeins_encoder import SapeinsVisualEncoder
 from .freezer import FullFreezer, NoFreezer, LoraFreezer
-from .token_sampler_adapter.token_sampler_adapter import VisualSampleAdapter
+from .token_sampler_adapter.token_sampler_adapter import TokenSampleAdapter
 from .vitpose_visual_lora_encoder.vitpose_visual_lora_encoder import (
     VitPoseLoraVisualEncoder,
 )
+from .dinov2_backbone.dinov2_backbone import DinoV2Backbone
 
 
 __all__ = [
+    "DinoV2Backbone",
+    "TokenSampleAdapter",
     "VitPoseLoraVisualEncoder",
     "LoraFreezer",
-    "VisualSampleAdapter",
     "FullFreezer",
     "NoFreezer",
     "SapeinsVisualEncoder",

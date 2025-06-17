@@ -53,13 +53,13 @@ class SpatialTemporalAdapter(nn.Module):
         # x: (B, T, HW, C)
         B, T, HW, C = x.shape
         assert HW == self.H * self.W, "HW must match H * W"
-        x = rearrange(x, "b t (h w) c -> (b t) c h w", h=self.H, w=self.W)
+        x = rearrange(x, "b t (h w) c -> (b t) c h w", h=self.H, w=self.W).contiguous()
         x = self.s1(x)
-        x = rearrange(x, "(b t) c h w -> b c t h w", b=B, t=T)
+        x = rearrange(x, "(b t) c h w -> b c t h w", b=B, t=T).contiguous()
         x = self.downsample(x)
-        x = rearrange(x, "b c t h w -> (b t) c h w")
+        x = rearrange(x, "b c t h w -> (b t) c h w").contiguous()
         x = self.s2(x)
-        x = rearrange(x, "(b t) c h w -> b t h w c ", b=B)
+        x = rearrange(x, "(b t) c h w -> b t h w c ", b=B).contiguous()
         x = self.pool(x)  # Apply pooling to reduce spatial dimensions
         x = self.proj(x)
         v_lenth = v_length // self._downsample[0]
