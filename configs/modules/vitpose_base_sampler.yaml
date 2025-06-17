@@ -10,9 +10,12 @@ visual_adapter:
   num_heads: 6
   num_layers: 2
   num_extra_queries: 4
+  attn_drop: 0.1
+  proj_drop: 0.5
 
 bert_shared_encoder_id: dbmdz/bert-base-german-europeana-cased
 num_query_token: 64
+hidden_dropout: 0.5
 
 freezer:
   _target_: modules.FullFreezer

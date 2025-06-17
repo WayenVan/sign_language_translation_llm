@@ -3,7 +3,11 @@ optimizer:
   lr: 1e-5
 
 lr_scheduler:
-  name: linear
-  warmup_steps: 0
-  training_steps: 100
-  kwargs: null
+  type: native
+  instance:
+    _target_: torch.optim.lr_scheduler.StepLR
+    step_size: 50
+  # name: linear
+  # warmup_steps: 0
+  # training_steps: 100
+  # kwargs: null

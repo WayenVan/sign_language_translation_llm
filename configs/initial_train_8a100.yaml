@@ -1,8 +1,8 @@
 defaults:
   - base_train
   # - override data: ph14t_with_text_aug
-  # - override modules: vitpose_base_sampler
-  - override modules: vitpose_base_bert_large
+  - override modules: vitpose_base_sampler
+  # - override modules: vitpose_base_bert_large
   # - override modules: vitpose_large_sampler
   # - override modules: vitpose_base_lora_sampler
   # - override modules: sapiens_0.3b
@@ -12,7 +12,7 @@ defaults:
   - _self_
 
 debug: False
-max_epochs: 100
+max_epochs: 80
 devices: [2, 3, 4, 5, 6, 7]
 precision: bf16-mixed
 
@@ -24,10 +24,11 @@ data:
 
 engine:
   lr_scheduler:
-    training_steps: 100
-    warmup_steps: 4
+    instance:
+      step_size: 30
+      gemma: 0.5
   optimizer:
-    lr: 1e-5
+    lr: 1e-4
 
 vtg_flag: True
 vtg_weight: 1.0

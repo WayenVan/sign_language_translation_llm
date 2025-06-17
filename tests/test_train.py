@@ -87,7 +87,7 @@ def train(
     # NOTE: define callbacks for trainer
     cbs = [
         callbacks.RichProgressBar(),
-        DebugCallback(),
+        # DebugCallback(),
     ]
 
     cfg.data.datamodule.num_workers = 1

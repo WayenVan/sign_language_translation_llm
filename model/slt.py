@@ -94,6 +94,7 @@ class SLTModel(LightningModule):
         self.bert_config.add_cross_attention = True
         self.bert_config.query_length = self.num_query_token
         self.bert_config.encoder_width = self.hidden_size
+        self.bert_config.hidden_dropout = self.cfg.modules.hidden_dropout
 
         self.shared_encoder = BertLMHeadModel(self.bert_config)
         params = BertLMHeadModelFromHF.from_pretrained(
@@ -321,6 +322,32 @@ class SLTModel(LightningModule):
         # NOTE: delegate the train to the freezer
         self.freezer.train(is_train)
 
+    @staticmethod
+    def get_lr_schuduler(cfg, optimizer: Optimizer):
+        lr_config = cfg.engine.lr_scheduler
+        if lr_config.type == "native" or lr_config.type == "timm":
+            return instantiate(lr_config.instance, optimizer=optimizer)
+        elif lr_config.type == "transformers":
+            # scheduler = instantiate(self.cfg.engine.lr_scheduler, opt)
+            kwarges = cfg.engine.lr_scheduler.kwargs
+            if kwarges is None:
+                kwarges = {}
+            else:
+                kwarges = OmegaConf.to_container(kwarges, resolve=True)
+
+            scheduler = get_scheduler(
+                cfg.engine.lr_scheduler.name,
+                optimizer=optimizer,
+                num_warmup_steps=cfg.engine.lr_scheduler.warmup_steps,
+                num_training_steps=cfg.engine.lr_scheduler.training_steps,
+                scheduler_specific_kwargs=kwarges,
+            )
+            return scheduler
+        else:
+            raise ValueError(
+                f"Unsupported lr scheduler type: {cfg.engine.lr_scheduler.type}"
+            )
+
     def configure_optimizers(self):
         opt: Optimizer = instantiate(
             self.cfg.engine.optimizer,
@@ -328,21 +355,7 @@ class SLTModel(LightningModule):
                 {"params": filter(lambda p: p.requires_grad, self.parameters())},
             ],
         )
-
-        # scheduler = instantiate(self.cfg.engine.lr_scheduler, opt)
-        kwarges = self.cfg.engine.lr_scheduler.kwargs
-        if kwarges is None:
-            kwarges = {}
-        else:
-            kwarges = OmegaConf.to_container(kwarges, resolve=True)
-
-        scheduler = get_scheduler(
-            self.cfg.engine.lr_scheduler.name,
-            opt,
-            num_warmup_steps=self.cfg.engine.lr_scheduler.warmup_steps,
-            num_training_steps=self.cfg.engine.lr_scheduler.training_steps,
-            scheduler_specific_kwargs=kwarges,
-        )
+        scheduler = self.get_lr_schuduler(self.cfg, opt)
         return {
             "optimizer": opt,
             "lr_scheduler": {
