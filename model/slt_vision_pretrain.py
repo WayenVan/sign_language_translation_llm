@@ -47,14 +47,14 @@ class SignBackboneForVPretraining(LightningModule):
             param.requires_grad = False
         self.visual_backbone.eval()
 
-    def dispatch_batch(
-        self, batch, device
-    ) -> tuple[list[str], Tensor, Tensor, list[str]]:
+    def dispatch_batch(self, batch, device):
         ids: list[str] = batch["id"]
         video: Tensor = batch["video"].to(device)
+        video_aug1 = batch["video_aug1"].to(device)
+        video_aug2 = batch["video_aug2"].to(device)
         video_length: Tensor = batch["video_length"].to(device)
         text: list[str] = batch["text"]
-        return ids, video, video_length, text
+        return ids, video_aug1, video_aug2, video_length, text
 
     def forward(
         self,
@@ -73,11 +73,14 @@ class SignBackboneForVPretraining(LightningModule):
         """
         Training step for the model.
         """
-        ids, video, video_length, text = self.dispatch_batch(batch, self.device)
-        feats = self.forward(video, video_length)
+        ids, video_aug1, video_aug2, video_length, text = self.dispatch_batch(
+            batch, self.device
+        )
+        feats1 = self.forward(video_aug1, video_length)
+        feats2 = self.forward(video_aug2, video_length)
 
         # Calculate loss for each shift
-        loss = self.calculate_loss(self.shifts, feats, video_length)
+        loss = self.calculate_loss(self.shifts, feats1, feats2, video_length)
         self.log("train_siam_loss", loss, on_step=True, on_epoch=True, prog_bar=True)
 
         return loss
@@ -86,15 +89,18 @@ class SignBackboneForVPretraining(LightningModule):
         """
         Validation step for the model.
         """
-        ids, video, video_length, text = self.dispatch_batch(batch, self.device)
-        feats = self.forward(video, video_length)  # [B, T, C]
+        ids, video_aug1, video_aug2, video_length, text = self.dispatch_batch(
+            batch, self.device
+        )
+        # aug1 == aug2, so we can use either one
+        feats = self.forward(video_aug1, video_length)  # [B, T, C]
 
         # Calculate loss for each shift
-        loss = self.calculate_loss(self.shifts, feats, video_length)
-        self.log("val_siam_loss", loss, on_step=True, on_epoch=True, prog_bar=True)
+        loss = self.calculate_loss(self.shifts, feats, feats, video_length)
+
+        self.log("val_siam_loss", loss, on_epoch=True, prog_bar=True)
 
         stds = rearrange(feats, "b t c -> (b t) c").std(dim=1).mean()
-
         self.log(
             "val_feats_std",
             stds,
@@ -160,16 +166,17 @@ class SignBackboneForVPretraining(LightningModule):
         ) < lengths.unsqueeze(1)
         return mask.long()  # (B, max_length)
 
-    def calculate_loss(self, shifts, feats, v_length):
+    def calculate_loss(self, shifts, feats1, feats2, v_length):
         """
         feats: [B, T, C]
         """
-        forward_shift = feats[:, shifts:]
-        backward_shift = feats[:, :-shifts]
+        forward_shift = feats1[:, shifts:]
+        backward_shift = feats2[:, :-shifts]
 
-        fests_mask = self.length_to_mask(v_length, max_length=feats.size(1))
-        forward_mask = fests_mask[:, shifts:]
-        backward_mask = fests_mask[:, :-shifts]
+        feats_mask = self.length_to_mask(v_length, max_length=feats1.size(1))
+        forward_mask = feats_mask[:, shifts:]
+        backward_mask = feats_mask[:, :-shifts]
+
         mask = forward_mask * backward_mask
 
         forward_pred = self.forward_predictor(forward_shift)
@@ -193,7 +200,8 @@ class SignBackboneForVPretraining(LightningModule):
         predicted = F.normalize(predicted, dim=-1)  # [B, T, C]
         target = F.normalize(target, dim=-1)
 
-        sim = -torch.einsum("btc,btc->bt", predicted, target)  # [B, T]
+        # sim = -torch.einsum("btc,btc->bt", predicted, target)  # [B, T]
+        sim = -F.cosine_similarity(predicted, target, dim=-1)  # [B, T]
 
         assert (padding_mask.sum(dim=-1) > 0).all(), (
             "Padding mask should not be all zeros"

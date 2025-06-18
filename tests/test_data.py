@@ -37,7 +37,7 @@ def test_dataset():
 
 def test_datamodule():
     initialize(config_path="../configs")
-    cfg = compose("initial_train_l40s")
+    cfg = compose("siam_train_8a100")
 
     datamodule = Ph14TDataModule(cfg)
     datamodule.setup("fit")

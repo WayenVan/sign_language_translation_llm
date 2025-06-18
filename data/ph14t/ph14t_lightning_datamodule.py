@@ -79,6 +79,18 @@ class Ph14TDataModule(LightningDataModule):
             **kwargs,
         )
 
+    def collate_video(vidoes: list):
+        """
+        Collate function to handle padding of video sequences.
+        """
+        v_length = [video.shape[0] for video in vidoes]
+        max_v_length = max(v_length)
+        padded_videos = [
+            F.pad(video, (0, 0, 0, 0, 0, 0, 0, max_v_length - video.shape[0]))
+            for video in vidoes
+        ]
+        return torch.stack(padded_videos), torch.tensor(v_length).long()
+
     @staticmethod
     def collate_fn(batch):
         videos = [
@@ -87,19 +99,19 @@ class Ph14TDataModule(LightningDataModule):
             else item["video"]
             for item in batch
         ]
-        v_length = [video.shape[0] for video in videos]
-        max_v_length = max(v_length)
-        padded_videos = [
-            F.pad(video, (0, 0, 0, 0, 0, 0, 0, max_v_length - video.shape[0]))
-            for video in videos
-        ]
-        padded_videos = torch.stack(padded_videos)
-
-        ret = dict(video=padded_videos, video_length=torch.tensor(v_length).long())
+        padded_videos, v_length = Ph14TDataModule.collate_video(videos)
+        ret = dict(video=padded_videos, video_length=v_length)
 
         # handle other keys in the batch
         for key in batch[0].keys():
             if key == "video":
+                continue
+            if key == "video_aug1" or key == "video_aug2":
+                padded_videos, v_length = Ph14TDataModule.collate_video(
+                    [item[key] for item in batch]
+                )
+                ret[key] = padded_videos
+                ret[f"{key}_length"] = v_length
                 continue
             if isinstance(batch[0][key], torch.Tensor):
                 ret[key] = torch.stack([item[key] for item in batch])

@@ -14,8 +14,14 @@ from .text import (
     RandomWordAugmentation,
     ExtendedPh14TTextAugmentation,
 )
+from .simsiam import (
+    SimSiamTransformForTrain,
+    SimSiamTransformForEval,
+)
 
 __all__ = [
+    "SimSiamTransformForTrain",
+    "SimSiamTransformForEval",
     "UniGapSampleVideo",
     "RandomHorizontalFlipVideo",
     "RandomWordAugmentation",

@@ -88,7 +88,7 @@ def train(
     # NOTE: define callbacks for trainer
     cbs = [
         callbacks.RichProgressBar(),
-        # DebugCallback(),
+        DebugCallback(),
     ]
 
     cfg.data.datamodule.num_workers = 1
@@ -119,7 +119,7 @@ def train(
 
     logger.info(f"Process in local rank {t.local_rank}, global rank {t.global_rank}")
 
-    datamodule = instantiate(cfg.data.datamodule.instance, cfg)
+    datamodule = instantiate(cfg.data.datamodule, cfg)
     model = SignBackboneForVPretraining(cfg)
     t.fit(model, datamodule=datamodule)
 
