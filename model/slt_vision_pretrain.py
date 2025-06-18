@@ -1,3 +1,4 @@
+from einops import rearrange
 import torch
 from torch import nn, Tensor
 from lightning import LightningModule
@@ -9,6 +10,7 @@ from hydra.utils import instantiate
 from typing import List
 from transformers import get_scheduler
 from torch.optim import Optimizer
+from torch.nn import functional as F
 
 
 def build_mlp(depth, hidden_size, output_hidden_size):
@@ -85,13 +87,21 @@ class SignBackboneForVPretraining(LightningModule):
         Validation step for the model.
         """
         ids, video, video_length, text = self.dispatch_batch(batch, self.device)
-        feats = self.forward(video, video_length)
+        feats = self.forward(video, video_length)  # [B, T, C]
 
         # Calculate loss for each shift
         loss = self.calculate_loss(self.shifts, feats, video_length)
         self.log("val_siam_loss", loss, on_step=True, on_epoch=True, prog_bar=True)
 
-        return loss
+        stds = rearrange(feats, "b t c -> (b t) c").std(dim=1).mean()
+
+        self.log(
+            "val_feats_std",
+            stds,
+            on_step=True,
+            on_epoch=True,
+            prog_bar=True,
+        )
 
     @staticmethod
     def get_lr_schuduler(cfg, optimizer: Optimizer):
@@ -180,11 +190,14 @@ class SignBackboneForVPretraining(LightningModule):
         """
         target = target.detach()
 
-        mse = (predicted - target).pow(2).mean(dim=-1)  # [B, T]
-        mse = mse * padding_mask.float()  # [B, T]
+        predicted = F.normalize(predicted, dim=-1)  # [B, T, C]
+        target = F.normalize(target, dim=-1)
+
+        sim = -torch.einsum("btc,btc->bt", predicted, target)  # [B, T]
 
         assert (padding_mask.sum(dim=-1) > 0).all(), (
             "Padding mask should not be all zeros"
         )
-        mse = mse.sum(dim=-1) / padding_mask.sum(dim=-1)
-        return mse.sum(dim=-1).mean()
+        sim = sim * padding_mask.float()  # [B, T]
+        sim = sim.sum(dim=-1) / padding_mask.sum(dim=-1)
+        return sim.sum(dim=-1).mean()

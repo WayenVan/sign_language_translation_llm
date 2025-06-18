@@ -2,6 +2,10 @@ visual_encoder:
   _target_: modules.DinoV2Backbone
   id: facebook/dinov2-with-registers-base
   output_layer: -2
+  # start_lora_layer: 6
+  # r: 8
+  # lora_alpha: 32
+  # lora_dropout: 0.1
 
 visual_hidden_size: 768
 
@@ -9,7 +13,7 @@ visual_adapter:
   _target_: modules.TokenSampleAdapter
   hidden_size: ${modules.visual_hidden_size}
   num_heads: 8
-  num_layers: 4
+  num_layers: 2
   num_extra_queries: 4
 
 predictor_depth: 2
