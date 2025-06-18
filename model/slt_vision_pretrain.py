@@ -17,6 +17,7 @@ def build_mlp(depth, hidden_size, output_hidden_size):
     modules = [nn.Linear(hidden_size, output_hidden_size)]
     for _ in range(1, depth):
         modules.append(nn.GELU())
+        modules.append(nn.BatchNorm1d(output_hidden_size))
         modules.append(nn.Linear(output_hidden_size, output_hidden_size))
     return nn.Sequential(*modules)
 
@@ -43,9 +44,9 @@ class SignBackboneForVPretraining(LightningModule):
             self.visual_hidden_size,
         )
 
-        for param in self.visual_backbone.parameters():
-            param.requires_grad = False
-        self.visual_backbone.eval()
+        # for param in self.visual_backbone.parameters():
+        #     param.requires_grad = False
+        # self.visual_backbone.eval()
 
     def dispatch_batch(self, batch, device):
         ids: list[str] = batch["id"]
@@ -64,9 +65,9 @@ class SignBackboneForVPretraining(LightningModule):
         """
         Forward pass through the visual encoder and adapter.
         """
-        with torch.no_grad():
-            feats = self.visual_backbone(video)
-        feats = self.visual_adapter(feats)
+        # with torch.no_grad():
+        feats = self.visual_backbone(video)
+        # feats = self.visual_adapter(feats)
         return feats
 
     def training_step(self, batch, batch_idx):
@@ -170,6 +171,7 @@ class SignBackboneForVPretraining(LightningModule):
         """
         feats: [B, T, C]
         """
+        B, T, C = feats1.size()
         forward_shift = feats1[:, shifts:]
         backward_shift = feats2[:, :-shifts]
 
@@ -179,8 +181,29 @@ class SignBackboneForVPretraining(LightningModule):
 
         mask = forward_mask * backward_mask
 
-        forward_pred = self.forward_predictor(forward_shift)
-        backward_pred = self.backward_predictor(backward_shift)
+        _forward_shift = rearrange(
+            forward_shift,
+            "b t c -> (b t) c",
+        )
+        _backward_shift = rearrange(
+            backward_shift,
+            "b t c -> (b t) c",
+        )
+        forward_pred = self.forward_predictor(_forward_shift)
+        backward_pred = self.backward_predictor(_backward_shift)
+
+        forward_pred = rearrange(
+            forward_pred,
+            "(b t) c -> b t c",
+            b=B,
+            t=T - shifts,
+        )
+        backward_pred = rearrange(
+            backward_pred,
+            "(b t) c -> b t c",
+            b=B,
+            t=T - shifts,
+        )
 
         forward_loss = (
             self.distance(forward_pred, backward_shift, mask) / 2
@@ -207,5 +230,5 @@ class SignBackboneForVPretraining(LightningModule):
             "Padding mask should not be all zeros"
         )
         sim = sim * padding_mask.float()  # [B, T]
-        sim = sim.sum(dim=-1) / padding_mask.sum(dim=-1)
-        return sim.sum(dim=-1).mean()
+        sim = sim.sum(dim=-1) / padding_mask.sum(dim=-1)  # [B]
+        return sim.mean()

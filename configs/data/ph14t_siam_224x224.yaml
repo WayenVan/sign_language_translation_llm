@@ -13,6 +13,7 @@ transforms:
         height: 256
         width: 256
       - _target_: data.transforms.SimSiamTransformForTrain
+        sample_n_frames: 32
         crop_size: [224, 224]
         max_pixel_value: 1.0
         mean: [0.485, 0.456, 0.406]
@@ -28,6 +29,7 @@ transforms:
         height: 256
         width: 256
       - _target_: data.transforms.SimSiamTransformForEval
+        sample_n_frames: 32
         crop_size: [224, 224]
         max_pixel_value: 1.0
         mean: [0.485, 0.456, 0.406]

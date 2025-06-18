@@ -3,6 +3,8 @@ import sys
 
 sys.path.append(".")
 from model.slt import SLTModel
+from model.slt_vision_pretrain import SignBackboneForVPretraining
+from model.t5_text_pretrain import ModelForT5TextPretrain
 from data.ph14t import Ph14TDataModule
 from hydra import compose, initialize
 import torch
@@ -28,19 +30,19 @@ def test_slt_model():
     import polars as pl
 
     initialize(config_path="../configs")
-    cfg = compose("initial_train_8a100")
+    cfg = compose("t5_text_pretrain_8a100")
     cfg.data.batch_size = 2
     data_module = Ph14TDataModule(cfg)
     data_module.setup()
-    model = SLTModel(
+    model = ModelForT5TextPretrain(
         cfg=cfg,
-    ).cuda()
+    ).to("cuda:4")
     loader = data_module.train_dataloader()
     for i, batch in enumerate(loader):
-        with torch.autocast("cuda"):
-            model.training_step(batch, 0)
-            # model.validation_step(batch, 0)
-            print("ok")
+        # with torch.autocast("cuda"):
+        # model.training_step(batch, 0)
+        model.validation_step(batch, 0)
+        print("ok")
 
 
 def test_slt_model_generation():
@@ -56,7 +58,7 @@ def test_slt_model_generation():
     # )
     model = SLTModel(
         cfg=cfg,
-    ).cuda()
+    ).to("cuda:4")
     loader = data_module.train_dataloader()
     for i, batch in enumerate(loader):
         if i < 8:
@@ -79,6 +81,6 @@ def test_slt_model_generation():
 
 
 if __name__ == "__main__":
-    # test_slt_model()
+    test_slt_model()
     # test_slt_model_inspect()
-    test_slt_model_generation()
+    # test_slt_model_generation()

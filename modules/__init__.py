@@ -1,6 +1,6 @@
 from .llamma_decoder.llamma_decoder import LlamaCrossDecoder
 from .loss.loss import Loss
-from .timm_visual_encoder.timm_visual_encoder import TimmVisualEncoder
+from .timm_conv_backbonoe.timm_visual_encoder import TimmConvBackbone
 from .native_transformer_encoder.native_transformer_encoder import (
     NativeTransformerEncoder,
 )
@@ -22,6 +22,7 @@ from .dinov2_backbone.dinov2_backbone import DinoV2Backbone
 
 
 __all__ = [
+    "TimmConvBackbone",
     "DinoV2Backbone",
     "TokenSampleAdapter",
     "VitPoseLoraVisualEncoder",
