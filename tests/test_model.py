@@ -5,6 +5,7 @@ sys.path.append(".")
 from model.slt import SLTModel
 from model.slt_vision_pretrain import SignBackboneForVPretraining
 from model.t5_text_pretrain import ModelForT5TextPretrain
+from model.mbart_slt import MBartSLTModel
 from data.ph14t import Ph14TDataModule
 from hydra import compose, initialize
 import torch
@@ -31,22 +32,23 @@ def test_slt_model():
     import polars as pl
 
     initialize(config_path="../configs")
-    cfg = compose("slt_finetune_8a100")
+    cfg = compose("slt_mbart_8a100")
     cfg.data.batch_size = 2
     data_module = Ph14TDataModule(cfg)
     data_module.setup()
-    model = instantiate(cfg.model, cfg).to("cuda:0")
+    # model = instantiate(cfg.model, cfg).to("cuda:0")
     # model = ModelForT5TextPretrain(
     #     cfg=cfg,
     # ).to("cuda:0")
-    model.load_from_pretrained(
-        "outputs/t5_text_pretrain_8a100/2025-06-18_19-56-11/epoch=79-val_generate_bleu=0.5015-blo6e98y.ckpt"
-    )
+    # model.load_from_pretrained(
+    #     "outputs/t5_text_pretrain_8a100/2025-06-18_19-56-11/epoch=79-val_generate_bleu=0.5015-blo6e98y.ckpt"
+    # )
+    model = MBartSLTModel(cfg).to("cuda:2")
     loader = data_module.train_dataloader()
     for i, batch in enumerate(loader):
         with torch.autocast("cuda", dtype=torch.bfloat16):
-            # model.training_step(batch, 0)
-            model.validation_step(batch, 0)
+            model.training_step(batch, 0)
+            # model.validation_step(batch, 0)
             print("ok")
 
 
