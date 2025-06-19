@@ -8,7 +8,7 @@ for name, module in model.named_modules():
     print(name, module.__class__.__name__)
 
 inputs = [
-    "The cat sat on the mat.",
+    "Reconstruct the following setences The cat sat on the mat.",
     "The dog chased the ball.",
     "The sun is shining brightly.",
 ]

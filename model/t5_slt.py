@@ -22,6 +22,7 @@ from transformers.models.t5.configuration_t5 import T5Config
 from transformers.models.t5.tokenization_t5_fast import T5TokenizerFast
 from transformers.modeling_outputs import BaseModelOutput
 from torchmetrics import Accuracy, BLEUScore
+from typing import Any
 import copy
 
 # logger = logging.getLogger(__name__)
@@ -127,6 +128,14 @@ class SLTModelForT5FineTune(LightningModule):
         # freeze the t5 model
         for param in self.t5.parameters():
             param.requires_grad = False
+
+        if self.cfg.full_tuning:
+            # If full tuning is enabled, we will not freeze the T5 model
+            for param in self.t5.decoder.parameters():
+                param.requires_grad = True
+            for param in self.t5.shared.parameters():
+                param.requires_grad = False
+
         self.t5.eval()
 
     def get_eos_embedding(self):
@@ -195,14 +204,15 @@ class SLTModelForT5FineTune(LightningModule):
             inputs_embeds=inputs_embeds,  # [B, T, D]
             attention_mask=attention_mask,  # [B, T]
         )
+        all_visual_feats = encoder_outputs.last_hidden_state  # [B, T, D]
         visual_global_embeddings = encoder_outputs.last_hidden_state[
             :, :G, :
         ]  # [B, G, D]
-        visual_connected_embeddings = self.connector(visual_global_embeddings)
+        visual_connected_embeddings = self.connector(all_visual_feats)  # [B, T, D]
         return (
             visual_connected_embeddings,
             visual_global_embeddings,
-            encoder_outputs.last_hidden_state,
+            all_visual_feats,  # [B, T, D]
             attention_mask,
         )
 
@@ -358,7 +368,10 @@ class SLTModelForT5FineTune(LightningModule):
             prog_bar=True,
         )
 
-        logits, _ = self.decoder_forward(visaul_connected_embeddings, decoder_input_ids)
+        # logits, _ = self.decoder_forward(visaul_connected_embeddings, decoder_input_ids)
+        logits, _ = self.decoder_forward(
+            visaul_connected_embeddings, decoder_input_ids, visual_attn_mask
+        )
         # Calculate loss
         LABEL_LENGTH = labels.shape[1]
         avialiable_logits = logits[:, :-1, :]
@@ -397,16 +410,23 @@ class SLTModelForT5FineTune(LightningModule):
     def validation_step(self, batch, batch_idx):
         id, video, video_length, text = self.dispatch_batch(batch, self.device)
         input_ids, attention_mask, decoder_input_ids, labels = self.tokenize_texts(text)
-        visual_connected_embeddings, visual_global_embeddings, _, _ = (
-            self.visual_encoder_forward(video, video_length)
-        )
+        # visual_connected_embeddings, visual_global_embeddings, _, _ = (
+        #     self.visual_encoder_forward(video, video_length)
+        # )
+        (
+            visaul_connected_embeddings,
+            visual_global_embeddings,
+            all_visual_feats,
+            visual_attn_mask,
+        ) = self.visual_encoder_forward(video, video_length)
 
         output = self.t5.generate(
             encoder_outputs=BaseModelOutput(
-                last_hidden_state=visual_connected_embeddings,
+                last_hidden_state=visaul_connected_embeddings,  # [B, T, D]
                 hidden_states=None,
                 attentions=None,
             ),
+            attention_mask=visual_attn_mask,  # [B, T]
             max_length=50,
         )
         decoded_output = self.tokenizer.batch_decode(output, skip_special_tokens=True)
@@ -414,6 +434,9 @@ class SLTModelForT5FineTune(LightningModule):
         self.bleu.update(decoded_output, reference)
         self.blue4.update(decoded_output, reference)
         return output
+
+    def on_load_checkpoint(self, checkpoint: dict[str, Any]) -> None:
+        self.t5.to(torch.bfloat16)  # Use bfloat16 for better performance on TPUs
 
     @staticmethod
     def get_lr_schuduler(cfg, optimizer: Optimizer):
