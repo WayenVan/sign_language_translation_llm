@@ -43,7 +43,7 @@ def test_slt_model():
     # model.load_from_pretrained(
     #     "outputs/t5_text_pretrain_8a100/2025-06-18_19-56-11/epoch=79-val_generate_bleu=0.5015-blo6e98y.ckpt"
     # )
-    model = MBartSLTModel(cfg).to("cuda:2")
+    model = MBartSLTModel(cfg).to("cuda:0")
     loader = data_module.train_dataloader()
     for i, batch in enumerate(loader):
         with torch.autocast("cuda", dtype=torch.bfloat16):

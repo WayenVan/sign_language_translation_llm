@@ -1,0 +1,10 @@
+optimizer:
+  _target_: torch.optim.Adam
+  lr: 1e-5
+
+lr_scheduler:
+  type: native
+  name: linear
+  warmup_steps: 0
+  training_steps: 100
+  kwargs: null

@@ -19,9 +19,13 @@ from .vitpose_visual_lora_encoder.vitpose_visual_lora_encoder import (
     VitPoseLoraVisualEncoder,
 )
 from .dinov2_backbone.dinov2_backbone import DinoV2Backbone
+from .token_sampler_tconv_adapter.token_sampler_tconv_adapter import (
+    TokenSampleTConvDapter,
+)
 
 
 __all__ = [
+    "TokenSampleTConvDapter",
     "TimmConvBackbone",
     "DinoV2Backbone",
     "TokenSampleAdapter",
