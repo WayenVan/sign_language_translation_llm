@@ -8,6 +8,7 @@ from .video import (
     UniformSampleVideo,
     RandomHorizontalFlipVideo,
     UniGapSampleVideo,
+    JitteredUniformSampleVideo,
 )
 
 from .text import (
@@ -20,6 +21,7 @@ from .simsiam import (
 )
 
 __all__ = [
+    "JitteredUniformSampleVideo",
     "SimSiamTransformForTrain",
     "SimSiamTransformForEval",
     "UniGapSampleVideo",

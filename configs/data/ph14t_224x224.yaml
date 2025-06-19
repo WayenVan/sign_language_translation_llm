@@ -7,8 +7,11 @@ transforms:
   train:
     _target_: torchvision.transforms.Compose
     transforms:
-      - _target_: data.transforms.UniformSampleVideo
+      - _target_: data.transforms.JitteredUniformSampleVideo
         target_len: 128
+        jitter_strength: 0.5
+      # - _target_: data.transforms.UniformSampleVideo
+      #   target_len: 128
       - _target_: data.transforms.ResizeVideo
         height: 256
         width: 256
