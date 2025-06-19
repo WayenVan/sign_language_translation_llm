@@ -16,46 +16,73 @@ from lightning.pytorch.loggers import WandbLogger
 import lightning.pytorch as pl
 import torch
 
-from model.slt_pl import SLTModelForLLMFineTune
+# from model.slt_vision_pretrain import SignBackboneForVPretraining
+from model.t5_text_pretrain import ModelForT5TextPretrain
 import cv2
+
+import datetime
 
 from misc.git_utils import save_git_info
 from typing import Any, Dict
 
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-logger = logging.getLogger(__name__)  # NOTE: hydra already setupo the logger for us
 cv2.setNumThreads(0)  # NOTE: set the number of threads to 0 to avoid cv2 error
+
+local_rank = int(os.environ.get("LOCAL_RANK", "0"))
+global_rank = int(os.environ.get("RANK", "0"))
 
 
 # NOTE: the hydra appp only inisitalize once
-@hydra.main(
-    config_path="../configs", config_name="prompt_learning", version_base="1.3.2"
-)
+@hydra.main(config_path="../configs", config_name="initial_train", version_base="1.3.2")
 def main(cfg: DictConfig) -> None:
-    train(cfg)
-
-
-def train(cfg: DictConfig) -> None:
     hydra_config = hydra.core.hydra_config.HydraConfig.get()
-    output_dir = hydra_config.runtime.output_dir
+    train(cfg, hydra_config)
+
+
+def init_output_dir(config_name: str) -> str:
+    """
+    Initialize the output directory for the job.
+    """
+    now = datetime.datetime.now()
+    subfolder = now.strftime("%Y-%m-%d_%H-%M-%S")
+    output_dir = os.path.join("outputs", config_name, subfolder)
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+    return output_dir
+
+
+def init_logger(local_rank, output_dir: str):
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        handlers=[
+            logging.StreamHandler(),  # Stream handler for console output
+            logging.FileHandler(
+                os.path.join(output_dir, f"train_rank{local_rank}.log")
+            ),  # File handler for logging to a file
+        ],
+    )
+
+
+def train(
+    cfg: DictConfig,
+    hydra_config: DictConfig,
+) -> None:
     config_name = hydra_config.job.config_name
 
-    logger.info(f"Output directory: {output_dir}")
+    # NOTE: set the output directory
+    output_dir = os.environ.get(
+        config_name.upper() + "_OUTPUT_DIR",
+        None,
+    )
+    if output_dir is None:
+        print(f"Output directory not found in environment variables, initializing...")
+        output_dir = init_output_dir(config_name)
+        os.environ[config_name.upper() + "_OUTPUT_DIR"] = output_dir
 
-    # NOTE: define callbacks for trainer
-    cbs = [
-        callbacks.RichProgressBar(),
-        callbacks.LearningRateMonitor("step", log_momentum=True),
-        callbacks.ModelCheckpoint(
-            dirpath=output_dir,
-            filename="{epoch:02d}-{val_llm_generate_bleu:.2f}",
-            monitor="val_llm_generate_bleu",
-            mode="max",
-            save_last=True,
-            save_weights_only=True,
-        ),
-        # DebugCallback(),
-    ]
+    init_logger(local_rank, output_dir)
+    logger = logging.getLogger(__name__)
+    logger.info(f"Output directory: {output_dir}")
 
     # NOTE: set the logger
     wdb_config = OmegaConf.to_container(cfg, resolve=True)
@@ -65,6 +92,22 @@ def train(cfg: DictConfig) -> None:
         project="sign-langauge-translation-llm",
         config=wdb_config,
     )
+    run_id = str(lt_logger.experiment.id)
+
+    # NOTE: define callbacks for trainer
+    cbs = [
+        callbacks.RichProgressBar(),
+        callbacks.LearningRateMonitor("step", log_momentum=True),
+        callbacks.ModelCheckpoint(
+            dirpath=output_dir,
+            filename="{epoch:02d}-{val_generate_bleu:.4f}-" + run_id,
+            monitor="val_generate_bleu",
+            mode="max",
+            save_last=True,
+            save_weights_only=True,
+        ),
+        # DebugCallback(),
+    ]
 
     # NOTE: start training
     t = Trainer(
@@ -77,7 +120,7 @@ def train(cfg: DictConfig) -> None:
         gradient_clip_val=1.0,  # NOTE: gradient clipping will be normed
         # gradient_clip_algorithm="value",
         sync_batchnorm=True,
-        precision="bf16-mixed",  # WARN: only bf16 is supported
+        precision=cfg.precision,
         logger=lt_logger,
         # WARN: will slow down the training process, just for debug now
         # detect_anomaly=True,
@@ -93,14 +136,10 @@ def train(cfg: DictConfig) -> None:
     logger.info(f"Process in local rank {t.local_rank}, global rank {t.global_rank}")
 
     datamodule = instantiate(cfg.data.datamodule, cfg)
-
-    model = SLTModelForLLMFineTune(cfg=cfg)
-    state_dict = torch.load(
-        cfg.pretrained_checkpoint, map_location=f"cuda:{t.local_rank}"
-    )["state_dict"]
-    model.load_from_bootstrap(state_dict)
-
-    # start train
+    model = instantiate(cfg.model, cfg)
+    model.load_from_pretrained(
+        cfg.pretrained_checkpoint,  # type: ignore
+    )
     t.fit(model, datamodule=datamodule)
 
 
@@ -117,6 +156,7 @@ class DebugCallback(callbacks.Callback):
         batch_idx: int,
     ) -> None:
         self.current_train_batch = batch
+        self.logger = logging.getLogger("debug_callback")
 
     def on_before_backward(
         self, trainer: "pl.Trainer", pl_module: "pl.LightningModule", loss: torch.Tensor
@@ -126,11 +166,11 @@ class DebugCallback(callbacks.Callback):
             video = self.current_train_batch["video"]
             ids = self.current_train_batch["ids"]
 
-            logger.warning(f"Loss is NaN: {loss}")
-            logger.warning(
+            self.logger.warning(f"Loss is NaN: {loss}")
+            self.logger.warning(
                 f"Video shape: {video.shape}, mean: {video.mean()}, std: {video.std()}"
             )
-            logger.warning(f"input_ids: {ids}")
+            self.logger.warning(f"input_ids: {ids}")
             # trainer.should_stop = True
 
     def on_before_optimizer_step(
@@ -145,12 +185,12 @@ class DebugCallback(callbacks.Callback):
 
             if torch.isnan(param).any():
                 nan_flag = True
-                logger.warning(
+                self.logger.warning(
                     f"In Step {global_step}, Param {name} has mean: {param.mean()}, std: {param.std()}"
                 )
             if param.grad is not None and torch.isnan(param.grad).any():
                 nan_flag = True
-                logger.warning(
+                self.logger.warning(
                     f"In Step {global_step}, Param {name} has grad mean: {param.grad.mean()}, std: {param.grad.std()}"
                 )
         # if nan_flag and global_step >= 1000:

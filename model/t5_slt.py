@@ -1,8 +1,12 @@
+import logging
+
+
 from einops import rearrange
-from numpy import dtype
 import torch
 from torch import nn, Tensor
 from lightning import LightningModule
+import os
+
 
 from omegaconf import OmegaConf, DictConfig
 
@@ -13,14 +17,25 @@ from transformers import get_scheduler
 from torch.optim import Optimizer
 from torch.nn import functional as F
 
-from transformers.models.t5.modeling_t5 import T5ForConditionalGeneration
+from transformers.models.t5.modeling_t5 import T5ForConditionalGeneration, T5Stack
 from transformers.models.t5.configuration_t5 import T5Config
 from transformers.models.t5.tokenization_t5_fast import T5TokenizerFast
 from transformers.modeling_outputs import BaseModelOutput
 from torchmetrics import Accuracy, BLEUScore
+import copy
+
+# logger = logging.getLogger(__name__)
 
 
-class ModelForT5TextPretrain(LightningModule):
+def build_mlp(depth, hidden_size, output_hidden_size):
+    modules = [nn.Linear(hidden_size, output_hidden_size)]
+    for _ in range(1, depth):
+        modules.append(nn.GELU())
+        modules.append(nn.Linear(output_hidden_size, output_hidden_size))
+    return nn.Sequential(*modules)
+
+
+class SLTModelForT5FineTune(LightningModule):
     def __init__(self, cfg):
         super().__init__()
 
@@ -32,13 +47,67 @@ class ModelForT5TextPretrain(LightningModule):
             torch.randn(1, self.num_global_tokens, self.d_model),
             requires_grad=True,
         )
+
+        self.vision_global_tokens = nn.Parameter(
+            torch.randn(1, self.num_global_tokens, self.d_model),
+            requires_grad=True,
+        )
+
         self.train_accu = Accuracy(
             task="multiclass",
             num_classes=self.tokenizer.vocab_size,
             ignore_index=0,  # padding index
         )
+
+        self._init_visual_modules()
+
         self.bleu = BLEUScore(n_gram=1, smooth=True)
         self.blue4 = BLEUScore(n_gram=4, smooth=True)
+
+    def load_from_pretrained(self, path: str):
+        """
+        Load the model from a pretrained T5TextPretrain model.
+        """
+        ckpt = torch.load(path, map_location="cpu")
+        state_dict = ckpt["state_dict"]
+        keys_in_ckpt = set(state_dict.keys())
+        for name, p in self.named_parameters():
+            if name.startswith("t5."):
+                assert name in keys_in_ckpt, (
+                    f"Parameter {name} not found in the checkpoint"
+                )
+
+        keys = self.load_state_dict(ckpt["state_dict"], strict=False)
+
+        if os.environ.get("LOCAL_RANK", "0") == "0":
+            # NOTE: print information
+            for key in keys.missing_keys:
+                if not key.startswith("llm.") and not key.startswith("connector."):
+                    print(f"Missing key {key} in the state dict")
+            for key in keys.unexpected_keys:
+                print(f"Unexpected key {key} in the state dict")
+
+        self.t5.to(torch.bfloat16)  # Use bfloat16 for better performance on TPUs
+
+    def _init_visual_modules(self):
+        self.visual_backbone = instantiate(self.cfg.modules.backbone)
+        self.visual_adapter = instantiate(self.cfg.modules.visual_adapter)
+        self.connector = build_mlp(
+            self.cfg.modules.connector_depth, self.d_model, self.d_model
+        )
+
+        self.visual_encoder_cfg = copy.deepcopy(self.t5_config)
+        self.visual_encoder_cfg.is_decoder = False
+        self.visual_encoder_cfg.use_cache = False
+        self.visual_encoder_cfg.is_encoder_decoder = False
+        self.visual_encoder_cfg.num_layers = (
+            self.t5_config.num_layers * self.cfg.modules.visual_encoder_layer_scale
+        )
+        self.visual_encoder = T5Stack(self.visual_encoder_cfg)
+
+        for param in self.visual_backbone.parameters():
+            param.requires_grad = False
+        self.visual_backbone.eval()
 
     def _init_t5_model(self):
         mname = self.cfg.modules.t5_model_name
@@ -58,13 +127,7 @@ class ModelForT5TextPretrain(LightningModule):
         # freeze the t5 model
         for param in self.t5.parameters():
             param.requires_grad = False
-
-        # unfreeze the encoder
-        for name, param in self.t5.encoder.named_parameters():
-            param.requires_grad = True
-
-        for param in self.t5.shared.parameters():
-            param.requires_grad = False
+        self.t5.eval()
 
     def get_eos_embedding(self):
         """
@@ -105,6 +168,53 @@ class ModelForT5TextPretrain(LightningModule):
         bleu4 = self.blue4.compute()
         self.log("val_generate_bleu4", bleu4, prog_bar=True, sync_dist=True)
         self.blue4.reset()
+
+    def visual_encoder_forward(self, video: Tensor, video_length: Tensor):
+        """
+        Forward pass through the visual encoder.
+        """
+        B, T, C, H, W = video.shape
+        G = self.num_global_tokens
+
+        video, video_length = self.visual_backbone(
+            video, video_length
+        )  # [B, T, H, W, C]
+        video_feats, video_length = self.visual_adapter(
+            video, video_length
+        )  # [B, T, D], [B, T]
+
+        global_embeddings = self.vision_global_tokens.expand(B, G, -1)
+
+        inputs_embeds = torch.cat([global_embeddings, video_feats], dim=1)
+
+        video_length = video_length + G  # Add global tokens to length
+
+        attention_mask = self.length_to_mask(video_length)
+
+        encoder_outputs = self.visual_encoder(
+            inputs_embeds=inputs_embeds,  # [B, T, D]
+            attention_mask=attention_mask,  # [B, T]
+        )
+        visual_global_embeddings = encoder_outputs.last_hidden_state[
+            :, :G, :
+        ]  # [B, G, D]
+        visual_connected_embeddings = self.connector(visual_global_embeddings)
+        return visual_connected_embeddings, visual_global_embeddings
+
+    @staticmethod
+    def length_to_mask(lengths, max_length=None):
+        """
+        Convert lengths to a boolean mask.
+        lengths: [B]
+        max_length: int, optional
+        """
+        if max_length is None:
+            max_length = lengths.max().item()
+        B = lengths.size(0)
+        mask = torch.arange(max_length, device=lengths.device).expand(
+            B, max_length
+        ) < lengths.unsqueeze(1)
+        return mask.long()  # (B, max_length)
 
     def text_encoder_forward(self, input_ids: Tensor, attention_mask: Tensor):
         """
@@ -155,7 +265,7 @@ class ModelForT5TextPretrain(LightningModule):
             text_target=texts,
             padding=True,
             # truncation=False,
-            max_length=self.t5_config.max_length,
+            # max_length=self.t5_config.max_length,
             return_tensors="pt",
         )
         input_ids = tokenized.input_ids.to(self.device)  # [B, L]
@@ -187,6 +297,29 @@ class ModelForT5TextPretrain(LightningModule):
         text: list[str] = batch["text"]
         return ids, video, video_length, text
 
+    def visual_text_loss(
+        self,
+        visual_global_embeddings: Tensor,  # [B, G, D]
+        text_global_embeddings: Tensor,  # [B, G, D]
+    ):
+        """
+        Calculate the loss for the visual-text alignment.
+        This is a placeholder method and should be implemented based on the specific task.
+        """
+        # first try simple mse
+        text_global_embeddings = text_global_embeddings.detach()
+        text_global_embeddings = F.normalize(text_global_embeddings, dim=-1)
+        visual_global_embeddings = F.normalize(visual_global_embeddings, dim=-1)
+
+        mse = (
+            F.mse_loss(
+                visual_global_embeddings, text_global_embeddings, reduction="none"
+            )
+            .sum(dim=-1)
+            .mean()
+        )
+        return mse
+
     def training_step(self, batch, batch_idx):
         """
         Training step for the model.
@@ -194,9 +327,26 @@ class ModelForT5TextPretrain(LightningModule):
         ids, video, video_length, text = self.dispatch_batch(batch, self.device)
 
         input_ids, attention_mask, decoder_input_ids, labels = self.tokenize_texts(text)
-        global_embeddings = self.text_encoder_forward(input_ids, attention_mask)
 
-        logits, _ = self.decoder_forward(global_embeddings, decoder_input_ids)
+        text_global_embeddings = self.text_encoder_forward(input_ids, attention_mask)
+
+        visual_global_embeddings, visual_connected_embeddings = (
+            self.visual_encoder_forward(video, video_length)
+        )
+        # Calculate visual-text loss
+        visual_text_loss = (
+            self.visual_text_loss(visual_global_embeddings, text_global_embeddings)
+            * self.cfg.visual_text_alignment_weight
+        )
+        self.log(
+            "train_visual_text_loss",
+            visual_text_loss,
+            on_step=True,
+            on_epoch=True,
+            prog_bar=True,
+        )
+
+        logits, _ = self.decoder_forward(visual_connected_embeddings, decoder_input_ids)
         # Calculate loss
         LABEL_LENGTH = labels.shape[1]
         avialiable_logits = logits[:, :-1, :]
@@ -215,16 +365,19 @@ class ModelForT5TextPretrain(LightningModule):
             rearrange(labels, "b l -> (b l)"),
         )
         self.log("train_text_loss", loss, on_step=True, on_epoch=True, prog_bar=True)
-        return loss
+
+        return visual_text_loss + loss
 
     def validation_step(self, batch, batch_idx):
         id, video, video_length, text = self.dispatch_batch(batch, self.device)
         input_ids, attention_mask, decoder_input_ids, labels = self.tokenize_texts(text)
-        global_embeddings = self.text_encoder_forward(input_ids, attention_mask)
+        _, visual_connected_embeddings = self.visual_encoder_forward(
+            video, video_length
+        )
 
         output = self.t5.generate(
             encoder_outputs=BaseModelOutput(
-                last_hidden_state=global_embeddings,
+                last_hidden_state=visual_connected_embeddings,
                 hidden_states=None,
                 attentions=None,
             ),

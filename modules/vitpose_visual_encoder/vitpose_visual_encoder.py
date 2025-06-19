@@ -23,7 +23,7 @@ class VitPoseVisualEncoder(torch.nn.Module):
         self.hidden_states_layer = hidden_states_layer
 
     ViTPoseVisualEncoderOutput = namedtuple(
-        "ViTPoseVisualEncoderOutput", ["hidden_state", "video_length", "heatmaps"]
+        "ViTPoseVisualEncoderOutput", ["hidden_state", "video_length"]
     )
 
     def forward(
@@ -50,5 +50,5 @@ class VitPoseVisualEncoder(torch.nn.Module):
                 t=T,
             ),
             video_length=video_length,
-            heatmaps=rearrange(outputs.heatmaps, "(b t) k h w -> b t k h w", b=B, t=T),
+            # heatmaps=rearrange(outputs.heatmaps, "(b t) k h w -> b t k h w", b=B, t=T),
         )

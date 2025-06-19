@@ -1,0 +1,20 @@
+defaults:
+  - base_slt_fintune
+
+data:
+  batch_size: 6
+  batch_size_val_test: 4
+
+max_epochs: 80
+devices: [2, 3, 4, 5, 6, 7]
+precision: bf16-mixed
+
+datamodule:
+  num_workers: 8
+
+engine:
+  optimizer:
+    lr: 1e-4
+
+visual_text_alignment_weight: 4.0
+pretrained_checkpoint: outputs/t5_text_pretrain_8a100/2025-06-18_19-56-11/epoch=79-val_generate_bleu=0.5015-blo6e98y.ckpt

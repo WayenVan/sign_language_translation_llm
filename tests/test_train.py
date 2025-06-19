@@ -16,9 +16,8 @@ from lightning.pytorch.loggers import WandbLogger
 import lightning.pytorch as pl
 import torch
 
-# from model.slt import SLTModel
-# from model.slt_vision_pretrain import SignBackboneForVPretraining
-from model.t5_text_pretrain import ModelForT5TextPretrain
+from model import SLTModelForT5FineTune, ModelForT5TextPretrain
+
 import cv2
 
 import datetime
@@ -35,7 +34,10 @@ global_rank = int(os.environ.get("RANK", "0"))
 
 # NOTE: the hydra appp only inisitalize once
 @hydra.main(
-    config_path="../configs", config_name="t5_text_pretrain_8a100", version_base="1.3.2"
+    # config_path="../configs", config_name="t5_text_pretrain_8a100", version_base="1.3.2"
+    config_path="../configs",
+    config_name="slt_finetune_8a100",
+    version_base="1.3.2",
 )
 def main(cfg: DictConfig) -> None:
     hydra_config = hydra.core.hydra_config.HydraConfig.get()
@@ -98,7 +100,7 @@ def train(
     t = Trainer(
         accelerator="gpu",
         strategy="ddp_find_unused_parameters_true",
-        devices=[2],
+        devices=[0],
         callbacks=cbs,
         log_every_n_steps=50,
         max_epochs=cfg.max_epochs,
@@ -121,7 +123,10 @@ def train(
     logger.info(f"Process in local rank {t.local_rank}, global rank {t.global_rank}")
 
     datamodule = instantiate(cfg.data.datamodule, cfg)
-    model = ModelForT5TextPretrain(cfg)
+    model = instantiate(cfg.model, cfg)
+    model.load_from_pretrained(
+        "outputs/t5_text_pretrain_8a100/2025-06-18_19-56-11/epoch=79-val_generate_bleu=0.5015-blo6e98y.ckpt"
+    )
     t.fit(model, datamodule=datamodule)
 
 

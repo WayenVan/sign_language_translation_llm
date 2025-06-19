@@ -48,14 +48,6 @@ class VTGHandle(BaseHandle):
             random_replace_prob=cfg.vtg_mask_replace_prob,
         )
 
-    def on_train_epoch_end(self, module: LightningModule):
-        """
-        Called at the end of the training epoch.
-        """
-        train_acc = self.train_accu.compute()
-        module.log("train_generate_accu", train_acc, prog_bar=True, sync_dist=True)
-        self.train_accu.reset()
-
     def dispatch_batch(
         self, batch, device
     ) -> tuple[list[str], torch.Tensor, torch.Tensor, List[str]]:

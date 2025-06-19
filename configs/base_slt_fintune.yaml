@@ -1,0 +1,17 @@
+defaults:
+  - modules: t5_text_pretrain
+  - data: ph14t_224x224
+  - engine: default
+  - override hydra/hydra_logging: disabled
+  - override hydra/job_logging: disabled
+  - _self_
+
+model:
+  _target_: model.SLTModelForT5FineTune
+
+hydra:
+  run:
+    dir: .
+  sweep:
+    dir: .
+  output_subdir: null
