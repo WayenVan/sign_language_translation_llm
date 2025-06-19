@@ -56,7 +56,7 @@ class DinoV2Backbone(nn.Module):
             f"Created Lora dino for {self.id} Trainable parameters: {trainable}, All parameters: {all}, Ratio: {trainable / all:.2%}"
         )
 
-    def forward(self, video):
+    def forward(self, video, v_length):
         """
         videoo: [B, T, C, H, W]
         """
@@ -67,7 +67,7 @@ class DinoV2Backbone(nn.Module):
         ]
         feats = rearrange(feats, "(b t) hw c -> b t hw c", b=B, t=T)
 
-        return feats
+        return feats, v_length
 
 
 if __name__ == "__main__":

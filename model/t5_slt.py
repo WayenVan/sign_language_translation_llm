@@ -199,7 +199,12 @@ class SLTModelForT5FineTune(LightningModule):
             :, :G, :
         ]  # [B, G, D]
         visual_connected_embeddings = self.connector(visual_global_embeddings)
-        return visual_connected_embeddings, visual_global_embeddings
+        return (
+            visual_connected_embeddings,
+            visual_global_embeddings,
+            encoder_outputs.last_hidden_state,
+            attention_mask,
+        )
 
     @staticmethod
     def length_to_mask(lengths, max_length=None):
@@ -240,8 +245,10 @@ class SLTModelForT5FineTune(LightningModule):
 
     def decoder_forward(
         self,
-        global_embeddings,  # [B, G, D]
+        encoder_hidden_states,  # [B, G, D]
         decoder_input_ids: Tensor,  # [B, L]
+        attention_mask: Tensor
+        | None = None,  # [B, L] (optional, not used in this case)
     ):
         """
         Forward pass through the T5 decoder.
@@ -251,7 +258,8 @@ class SLTModelForT5FineTune(LightningModule):
         )  # [B, L, D]
         decoder_outputs = self.t5.decoder(
             inputs_embeds=decoder_input_embeddings,
-            encoder_hidden_states=global_embeddings,
+            encoder_hidden_states=encoder_hidden_states,
+            attention_mask=attention_mask,
         )
         logits = self.t5.lm_head(decoder_outputs.last_hidden_state)  # [B, L, C]
         return (
@@ -330,9 +338,13 @@ class SLTModelForT5FineTune(LightningModule):
 
         text_global_embeddings = self.text_encoder_forward(input_ids, attention_mask)
 
-        visual_global_embeddings, visual_connected_embeddings = (
-            self.visual_encoder_forward(video, video_length)
-        )
+        (
+            visaul_connected_embeddings,
+            visual_global_embeddings,
+            all_visual_feats,
+            visual_attn_mask,
+        ) = self.visual_encoder_forward(video, video_length)
+
         # Calculate visual-text loss
         visual_text_loss = (
             self.visual_text_loss(visual_global_embeddings, text_global_embeddings)
@@ -346,7 +358,7 @@ class SLTModelForT5FineTune(LightningModule):
             prog_bar=True,
         )
 
-        logits, _ = self.decoder_forward(visual_connected_embeddings, decoder_input_ids)
+        logits, _ = self.decoder_forward(visaul_connected_embeddings, decoder_input_ids)
         # Calculate loss
         LABEL_LENGTH = labels.shape[1]
         avialiable_logits = logits[:, :-1, :]
@@ -385,8 +397,8 @@ class SLTModelForT5FineTune(LightningModule):
     def validation_step(self, batch, batch_idx):
         id, video, video_length, text = self.dispatch_batch(batch, self.device)
         input_ids, attention_mask, decoder_input_ids, labels = self.tokenize_texts(text)
-        _, visual_connected_embeddings = self.visual_encoder_forward(
-            video, video_length
+        visual_connected_embeddings, visual_global_embeddings, _, _ = (
+            self.visual_encoder_forward(video, video_length)
         )
 
         output = self.t5.generate(
