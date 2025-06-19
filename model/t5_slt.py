@@ -351,7 +351,7 @@ class SLTModelForT5FineTune(LightningModule):
         LABEL_LENGTH = labels.shape[1]
         avialiable_logits = logits[:, :-1, :]
 
-        loss = F.cross_entropy(
+        generate_loss = F.cross_entropy(
             rearrange(avialiable_logits, "b l c -> (b l) c"),
             rearrange(labels, "b l -> (b l)"),
             ignore_index=-100,  # T5 uses -100
@@ -364,9 +364,23 @@ class SLTModelForT5FineTune(LightningModule):
             ],
             rearrange(labels, "b l -> (b l)"),
         )
-        self.log("train_text_loss", loss, on_step=True, on_epoch=True, prog_bar=True)
+        self.log(
+            "train_generate_loss",
+            generate_loss,
+            on_step=True,
+            on_epoch=True,
+            prog_bar=True,
+        )
 
-        return visual_text_loss + loss
+        total_loss = visual_text_loss + generate_loss
+        self.log(
+            "train_loss",
+            total_loss,
+            on_step=True,
+            on_epoch=True,
+            prog_bar=True,
+        )
+        return total_loss
 
     def validation_step(self, batch, batch_idx):
         id, video, video_length, text = self.dispatch_batch(batch, self.device)
