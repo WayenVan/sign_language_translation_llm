@@ -1,7 +1,7 @@
 import logging
 
 
-from einops import rearrange
+from einops import rearrange, einsum
 import torch
 from torch import nn, Tensor
 from lightning import LightningModule
@@ -389,6 +389,23 @@ class MBartSLTModel(LightningModule):
             ignore_index=-100,
         )
 
+        fine_grain_loss = (
+            self.contrastive_loss(
+                visual_last_hidden_states[:, 1:, :],  # [B, T-1, D]
+                visual_attn_mask[:, 1:],  # [B, T-1]
+                text_feats[:, 1:],  # [B, L, D]
+                attention_mask[:, 1:],  # [B, L]
+            )
+            * self.cfg.fine_grain_loss_weight
+        )
+        self.log(
+            "train_fine_grain_loss",
+            fine_grain_loss,
+            on_step=True,
+            on_epoch=True,
+            prog_bar=True,
+        )
+
         # Update accuracy
         self.train_accu.update(
             rearrange(avialiable_logits, "b l c -> (b l) c")[
@@ -404,7 +421,7 @@ class MBartSLTModel(LightningModule):
             prog_bar=True,
         )
 
-        total_loss = visual_text_loss + generate_loss
+        total_loss = visual_text_loss + generate_loss + fine_grain_loss
         self.log(
             "train_loss",
             total_loss,
@@ -438,7 +455,9 @@ class MBartSLTModel(LightningModule):
             ),
             attention_mask=visual_attn_mask,  # [B, T]
             forced_bos_token_id=self.tokenizer.lang_code_to_id[self.lang],
+            num_beams=4,
             max_length=50,
+            max_new_tokens=150,
         )
 
         decoded_output = self.tokenizer.batch_decode(output, skip_special_tokens=True)
@@ -446,6 +465,37 @@ class MBartSLTModel(LightningModule):
         self.bleu.update(decoded_output, reference)
         self.blue4.update(decoded_output, reference)
         return output
+
+    @staticmethod
+    def contrastive_loss(
+        visual_features: Tensor,  # [B, T, D]
+        visual_mask: Tensor,  # [B, T]
+        text_features: Tensor,  # [B, L, D]
+        text_mask: Tensor,  # [B, L]
+    ):
+        """
+        Compute contrastive loss between video and text embeddings.
+        Args:
+            visual_features: Video embeddings of shape (B, T, D)
+            visual_mask: Attention mask for video of shape (B, T)
+            text_features: Text embeddings of shape (B, L, D)
+            text_mask: Attention mask for text of shape (B, L)
+        """
+        visual_feats = F.normalize(visual_features, dim=-1, p=2)
+        text_feats = F.normalize(text_features, dim=-1, p=2).detach()
+
+        similarity = einsum(visual_feats, text_feats, "b t d, b l d -> b t l")
+
+        addictive_mask = text_mask.unsqueeze(1).float()
+        addictive_mask = addictive_mask.masked_fill(addictive_mask == 0, float("-inf"))
+
+        similarity = similarity + addictive_mask  # Apply padding mask
+
+        values, index = similarity.max(dim=-1)  # Get max indices, (B, T)
+
+        mean_values = values * visual_mask.float() / visual_mask.sum(-1, keepdim=True)
+
+        return -mean_values.mean()  # Mean over batch
 
     def on_load_checkpoint(self, checkpoint: dict[str, Any]) -> None:
         self.mbart.to(torch.bfloat16)  # Use bfloat16 for better performance on TPUs
