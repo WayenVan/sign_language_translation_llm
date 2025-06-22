@@ -28,10 +28,10 @@ transforms:
         #NOTE: text augtmentation
       - _target_: data.transforms.RandomWordAugmentation
         action: "delete"
-        aug_p: 0.2
+        aug_p: 0.5
       - _target_: data.transforms.RandomWordAugmentation
         action: "swap"
-        aug_p: 0.3
+        aug_p: 0.5
 
   val:
     _target_: torchvision.transforms.Compose
