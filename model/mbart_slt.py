@@ -16,6 +16,7 @@ from typing import List
 from transformers import get_scheduler
 from torch.optim import Optimizer
 from torch.nn import functional as F
+from misc.earth_mover_loss import masked_emd_batch
 
 # from transformers.models.t5.modeling_t5 import T5ForConditionalGeneration, T5Stack
 # from transformers.models.t5.configuration_t5 import T5Config
@@ -55,10 +56,11 @@ class MBartSLTModel(LightningModule):
             requires_grad=True,
         )
 
-        self.train_accu = Accuracy(
-            task="multiclass",
-            num_classes=self.tokenizer.vocab_size,
-            ignore_index=0,  # padding index
+        self.train_accu_visual = Accuracy(
+            task="multiclass", num_classes=self.tokenizer.vocab_size, ignore_index=-100
+        )
+        self.train_accu_text = Accuracy(
+            task="multiclass", num_classes=self.tokenizer.vocab_size, ignore_index=-100
         )
 
         self._init_visual_modules()
@@ -130,8 +132,10 @@ class MBartSLTModel(LightningModule):
             param.requires_grad = False
         # for param in self.mbart.base_model.decoder.parameters():
         #     param.requires_grad = True
-        # for param in self.mbart.shared.parameters():
-        #     param.requires_grad = False
+        for param in self.mbart.base_model.encoder.parameters():
+            param.requires_grad = True
+        for param in self.mbart.base_model.shared.parameters():
+            param.requires_grad = False
 
     def get_eos_embedding(self):
         """
@@ -157,9 +161,19 @@ class MBartSLTModel(LightningModule):
         """
         Called at the end of the training epoch.
         """
-        train_acc = self.train_accu.compute()
-        self.log("train_generate_accu", train_acc, prog_bar=True, sync_dist=True)
-        self.train_accu.reset()
+        train_visual_acc = self.train_accu_visual.compute()
+        train_text_acc = self.train_accu_text.compute()
+        self.log(
+            "train_generate_accu_visual",
+            train_visual_acc,
+            prog_bar=True,
+            sync_dist=True,
+        )
+        self.log(
+            "train_generate_accu_text", train_text_acc, prog_bar=True, sync_dist=True
+        )
+        self.train_accu_visual.reset()
+        self.train_accu_text.reset()
 
     def on_validation_epoch_end(self):
         """
@@ -199,6 +213,7 @@ class MBartSLTModel(LightningModule):
         encoder_outputs = self.visual_encoder(
             inputs_embeds=inputs_embeds,  # [B, T, D]
             attention_mask=attention_mask,  # [B, T]
+            output_hidden_states=True,  # Enable hidden states output
         )
 
         visual_last_hidden_states = encoder_outputs.last_hidden_state  # [B, T, D]
@@ -209,6 +224,7 @@ class MBartSLTModel(LightningModule):
             visual_feats,
             visual_lang_feats,
             visual_last_hidden_states,  # [B, T, D]
+            encoder_outputs.hidden_states,
             attention_mask,
         )
 
@@ -328,7 +344,7 @@ class MBartSLTModel(LightningModule):
         This is a placeholder method and should be implemented based on the specific task.
         """
         # first try simple mse
-        text_embedding = text_embedding.detach()
+        text_embedding = text_embedding
 
         text_embedding = F.normalize(text_embedding, dim=-1)
         visual_embedding = F.normalize(visual_embedding, dim=-1)
@@ -359,8 +375,18 @@ class MBartSLTModel(LightningModule):
             visual_feats,
             visual_lang_feats,
             visual_last_hidden_states,  # [B, T, D]
+            visual_hidden_states,  # [B, T, D]
             visual_attn_mask,
         ) = self.visual_encoder_forward(video, video_length)
+
+        # NOTE: decoder forward for both visual and text
+        # logits, _ = self.decoder_forward(visaul_connected_embeddings, decoder_input_ids)
+        visual_logits, _ = self.decoder_forward(
+            visual_feats, decoder_input_ids, visual_attn_mask, decoder_attn_mask
+        )
+        text_logits, _ = self.decoder_forward(
+            text_feats, decoder_input_ids, attention_mask, decoder_attn_mask
+        )
 
         # Calculate visual-text loss
         visual_text_loss = (
@@ -375,53 +401,97 @@ class MBartSLTModel(LightningModule):
             prog_bar=True,
         )
 
-        # logits, _ = self.decoder_forward(visaul_connected_embeddings, decoder_input_ids)
-        logits, _ = self.decoder_forward(
-            visual_feats, decoder_input_ids, visual_attn_mask, decoder_attn_mask
-        )
-        # Calculate loss
-        LABEL_LENGTH = labels.shape[1]
-        avialiable_logits = logits[:, :-1, :]
+        # Calculate visual generate loss
+        # LABEL_LENGTH = labels.shape[1]
+        avialiable_logits_visual = visual_logits[:, :-1, :]
 
-        generate_loss = F.cross_entropy(
-            rearrange(avialiable_logits, "b l c -> (b l) c"),
+        generate_loss_visual = F.cross_entropy(
+            rearrange(avialiable_logits_visual, "b l c -> (b l) c"),
             rearrange(labels, "b l -> (b l)"),
             ignore_index=-100,
         )
-
-        fine_grain_loss = (
-            self.contrastive_loss(
-                visual_last_hidden_states[:, 1:, :],  # [B, T-1, D]
-                visual_attn_mask[:, 1:],  # [B, T-1]
-                text_feats[:, 1:],  # [B, L, D]
-                attention_mask[:, 1:],  # [B, L]
-            )
-            * self.cfg.fine_grain_loss_weight
-        )
         self.log(
-            "train_fine_grain_loss",
-            fine_grain_loss,
+            "train_generate_loss_visual",
+            generate_loss_visual,
             on_step=True,
             on_epoch=True,
             prog_bar=True,
         )
 
+        # calculate text generate loss
+        avialiable_logits_text = text_logits[:, :-1, :]
+
+        generate_loss_text = F.cross_entropy(
+            rearrange(avialiable_logits_text, "b l c -> (b l) c"),
+            rearrange(labels, "b l -> (b l)"),
+            ignore_index=-100,
+        )
+        self.log(
+            "train_generate_loss_text",
+            generate_loss_text,
+            on_step=True,
+            on_epoch=True,
+            prog_bar=True,
+        )
+
+        # calculate the earth mover loss
+        earth_mover_loss = (
+            masked_emd_batch(
+                visual_hidden_states[self.visual_encoder_cfg.num_layers // 2 - 1][
+                    :, 1:, :
+                ],  # [B, T-1, D]
+                text_feats[:, 1:, :],  # [B, L, D]
+                visual_attn_mask[:, 1:],  # [B, T-1]
+                attention_mask[:, 1:],  # [B, L]
+                blur=self.cfg.earth_mover_blur,
+            )
+            * self.cfg.earth_mover_loss_weight
+        )
+        self.log(
+            "train_earth_mover_loss",
+            earth_mover_loss,
+            on_step=True,
+            on_epoch=True,
+            prog_bar=True,
+        )
+
+        # fine_grain_loss = (
+        #     self.contrastive_loss(
+        #         visual_last_hidden_states[:, 1:, :],  # [B, T-1, D]
+        #         visual_attn_mask[:, 1:],  # [B, T-1]
+        #         text_feats[:, 1:],  # [B, L, D]
+        #         attention_mask[:, 1:],  # [B, L]
+        #     )
+        #     * self.cfg.fine_grain_loss_weight
+        # )
+        # self.log(
+        #     "train_fine_grain_loss",
+        #     fine_grain_loss,
+        #     on_step=True,
+        #     on_epoch=True,
+        #     prog_bar=True,
+        # )
+
         # Update accuracy
-        self.train_accu.update(
-            rearrange(avialiable_logits, "b l c -> (b l) c")[
+        self.train_accu_visual.update(
+            rearrange(avialiable_logits_visual, "b l c -> (b l) c")[
                 :, : self.tokenizer.vocab_size
             ],
             rearrange(labels, "b l -> (b l)"),
         )
-        self.log(
-            "train_generate_loss",
-            generate_loss,
-            on_step=True,
-            on_epoch=True,
-            prog_bar=True,
+        self.train_accu_text.update(
+            rearrange(avialiable_logits_text, "b l c -> (b l) c")[
+                :, : self.tokenizer.vocab_size
+            ],
+            rearrange(labels, "b l -> (b l)"),
         )
 
-        total_loss = visual_text_loss + generate_loss + fine_grain_loss
+        total_loss = (
+            visual_text_loss
+            + generate_loss_visual
+            + generate_loss_text
+            + earth_mover_loss
+        )
         self.log(
             "train_loss",
             total_loss,
@@ -444,6 +514,7 @@ class MBartSLTModel(LightningModule):
             visual_feats,
             visual_lang_feats,
             visual_last_hidden_states,  # [B, T, D]
+            visual_hidden_states,  # [B, T, D]
             visual_attn_mask,
         ) = self.visual_encoder_forward(video, video_length)
 

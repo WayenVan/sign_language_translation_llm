@@ -18,7 +18,7 @@ class RandomWordAugmentation:
     def __call__(self, data: dict) -> dict:
         text = data["text"]
         text = self.aug.augment(text)
-        data["text"] = text
+        data["text"] = text[0]
         return data
 
 
@@ -56,3 +56,12 @@ class ExtendedPh14TTextAugmentation:
         data["original_text"] = original_text
         data["extended_texts"] = extended_texts
         return data
+
+
+if __name__ == "__main__":
+    # Example usage
+    augmenter = RandomWordAugmentation(action="swap", aug_p=0.3)
+    data = {"text": "This is a sample text for augmentation."}
+    augmented_data = augmenter(data)
+    print("Original Text:", data["text"])
+    print("Augmented Text:", augmented_data["text"])

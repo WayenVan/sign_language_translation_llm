@@ -37,7 +37,7 @@ def test_dataset():
 
 def test_datamodule():
     initialize(config_path="../configs")
-    cfg = compose("slt_finetune_8a100")
+    cfg = compose("slt_mbart_8a100")
 
     datamodule = Ph14TDataModule(cfg)
     datamodule.setup("fit")

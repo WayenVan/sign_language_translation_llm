@@ -102,7 +102,7 @@ def train(
     t = Trainer(
         accelerator="gpu",
         strategy="ddp_find_unused_parameters_true",
-        devices=[2],
+        devices=[0],
         callbacks=cbs,
         log_every_n_steps=50,
         max_epochs=cfg.max_epochs,

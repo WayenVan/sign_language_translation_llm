@@ -25,6 +25,13 @@ transforms:
         mean: [0.485, 0.456, 0.406]
         std: [0.229, 0.224, 0.225]
       - _target_: data.transforms.ToTensorVideo
+        #NOTE: text augtmentation
+      - _target_: data.transforms.RandomWordAugmentation
+        action: "delete"
+        aug_p: 0.2
+      - _target_: data.transforms.RandomWordAugmentation
+        action: "swap"
+        aug_p: 0.3
 
   val:
     _target_: torchvision.transforms.Compose
