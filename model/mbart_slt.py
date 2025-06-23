@@ -82,6 +82,7 @@ class MBartSLTModel(LightningModule):
 
         self.bleu = BLEUScore(n_gram=1, smooth=True)
         self.blue4 = BLEUScore(n_gram=4, smooth=True)
+        self.blue4_global = BLEUScore(n_gram=4, smooth=True)
 
     def load_from_pretrained(self, path: str):
         """
@@ -219,6 +220,12 @@ class MBartSLTModel(LightningModule):
         self.log("val_generate_bleu4", bleu4, prog_bar=True, sync_dist=True)
         self.blue4.reset()
 
+        bleu4_global = self.blue4_global.compute()
+        self.log(
+            "val_generate_bleu4_global", bleu4_global, prog_bar=True, sync_dist=True
+        )
+        self.blue4_global.reset()
+
     def visual_encoder_forward(self, video: Tensor, video_length: Tensor):
         """
         Forward pass through the visual encoder.
@@ -236,12 +243,23 @@ class MBartSLTModel(LightningModule):
         visual_global_token = self.visual_global_token.expand(B, 1, -1)
 
         inputs_embeds = torch.cat(
-            [visual_global_token, visual_src_lang_token, video_feats], dim=1
+            [
+                visual_src_lang_token,
+                video_feats,
+                visual_global_token,
+            ],
+            dim=1,
         )  # [B, 1 + T, D]
 
-        video_length = video_length + 2
-
+        video_length = video_length + 1
         attention_mask = self.length_to_mask(video_length)
+        attention_mask = torch.cat(
+            [
+                attention_mask,
+                torch.ones((B, 1), dtype=torch.long, device=self.device),
+            ],
+            dim=1,
+        )
 
         encoder_outputs = self.visual_encoder(
             inputs_embeds=inputs_embeds,  # [B, T, D]
@@ -252,9 +270,9 @@ class MBartSLTModel(LightningModule):
         visual_last_hidden_states = encoder_outputs.last_hidden_state  # [B, T, D]
 
         visual_global_feats = visual_last_hidden_states[
-            :, 0, :
+            :, -1, :
         ]  # [B, D] (global token)
-        visual_lang_feats = visual_last_hidden_states[:, 1, :]  # [B, D] (global token)
+        visual_lang_feats = visual_last_hidden_states[:, 0, :]  # [B, D] (global token)
 
         visual_feats = self.connector(visual_last_hidden_states)  # [B, T, D]
         return (
@@ -285,12 +303,12 @@ class MBartSLTModel(LightningModule):
         B, _ = input_ids.shape
         text_embeddings = self.mbart.get_input_embeddings()(input_ids)
         text_global_token = self.text_global_token.expand(B, 1, -1)
-        inputs_embeds = torch.cat([text_global_token, text_embeddings], dim=1)
+        inputs_embeds = torch.cat([text_embeddings, text_global_token], dim=1)
 
         attention_mask = torch.cat(
             [
-                torch.ones((B, 1), dtype=torch.long, device=self.device),  # [B, 1]
                 attention_mask,  # [B, L]
+                torch.ones((B, 1), dtype=torch.long, device=self.device),  # [B, 1]
             ],
             dim=1,
         )
@@ -302,8 +320,8 @@ class MBartSLTModel(LightningModule):
             attention_mask=attention_mask,  # [B, L+1]
         )
         text_last_hidden_states = encoder_outputs.last_hidden_state  # [B, L, D]
-        text_global_feats = text_last_hidden_states[:, 0, :]  # [B, D] (global token)
-        text_lang_feats = text_last_hidden_states[:, 1, :]  # [B, D] (global token)
+        text_global_feats = text_last_hidden_states[:, 1, :]  # [B, D] (global token)
+        text_lang_feats = text_last_hidden_states[:, 0, :]  # [B, D] (global token)
         return (
             text_last_hidden_states,  # [B, L, D]
             text_lang_feats,  # [B, D]
@@ -382,14 +400,18 @@ class MBartSLTModel(LightningModule):
             label_ids,
         )
 
-    def dispatch_batch(
-        self, batch, device
-    ) -> tuple[list[str], torch.Tensor, torch.Tensor, list[str]]:
+    def dispatch_batch(self, batch, device, mode="train"):
         ids: list[str] = batch["id"]
         video: torch.Tensor = batch["video"].to(device)
         video_length: torch.Tensor = batch["video_length"].to(device)
         text: list[str] = batch["text"]
-        return ids, video, video_length, text
+
+        if mode == "train":
+            original_text: list[str] = batch["original_text"]
+        else:
+            original_text = None
+
+        return ids, video, video_length, text, original_text
 
     def visual_text_loss(
         self,
@@ -417,12 +439,15 @@ class MBartSLTModel(LightningModule):
         """
         Training step for the model.
         """
-        ids, video, video_length, text = self.dispatch_batch(batch, self.device)
+        ids, video, video_length, augmented_text, original_text = self.dispatch_batch(
+            batch, self.device
+        )
 
-        # input_ids, attention_mask, decoder_input_ids, labels = self.tokenize_texts(text)
-        input_ids, attention_mask, decoder_input_ids, decoder_attn_mask, labels = (
-            self.tokenize_texts(text)
-        )  # [B, L], [B, L], [B, L], [B, L], [B, L]
+        # # NOTE : tokenize the text twice
+        input_ids, attention_mask, _, _, _ = self.tokenize_texts(augmented_text)
+        _, _, decoder_input_ids, decoder_attn_mask, labels = self.tokenize_texts(
+            original_text
+        )
 
         (text_feats, text_lang_feats, text_global_feats, text_attention_mask) = (
             self.text_encoder_forward(input_ids, attention_mask)
@@ -529,18 +554,18 @@ class MBartSLTModel(LightningModule):
         )
 
         # calculate the sign contrastive loss
-        signcl = SignCL()
-        signcl_loss = signcl(
-            visual_hidden_states[self.cfg.sign_cl_layer][:, 1:, :],  # [B, T-1, D]
-        )
-        self.log(
-            "train_signcl_loss",
-            signcl_loss,
-            on_step=True,
-            on_epoch=True,
-            prog_bar=True,
-        )
-
+        # signcl = SignCL()
+        # signcl_loss = signcl(
+        #     visual_hidden_states[self.cfg.sign_cl_layer][:, 1:, :],  # [B, T-1, D]
+        # )
+        # self.log(
+        #     "train_signcl_loss",
+        #     signcl_loss,
+        #     on_step=True,
+        #     on_epoch=True,
+        #     prog_bar=True,
+        # )
+        #
         # calculate the earth mover loss
         # earth_mover_loss = (
         #     masked_emd_batch(
@@ -609,7 +634,7 @@ class MBartSLTModel(LightningModule):
             visual_text_loss
             + generate_loss_visual
             + generate_loss_text
-            + signcl_loss
+            # + signcl_loss
             + generate_loss_visual_global
             + generate_loss_text_global
         )
@@ -623,12 +648,16 @@ class MBartSLTModel(LightningModule):
         return total_loss
 
     def validation_step(self, batch, batch_idx):
-        ids, video, video_length, text = self.dispatch_batch(batch, self.device)
+        ids, video, video_length, text, _ = self.dispatch_batch(
+            batch, self.device, "val"
+        )
 
         # tokenize the text
         input_ids, attention_mask, decoder_input_ids, decoder_attn_mask, labels = (
             self.tokenize_texts(text)
         )  # [B, L]
+
+        reference = [[t] for t in text]
 
         # visual forward
         (
@@ -643,6 +672,7 @@ class MBartSLTModel(LightningModule):
         output = self.mbart.generate(
             encoder_outputs=BaseModelOutput(
                 last_hidden_state=visual_feats,
+                # last_hidden_state=visual_global_feats.unsqueeze(1),  # [B, 1, D]
                 hidden_states=None,
                 attentions=None,
             ),
@@ -653,9 +683,26 @@ class MBartSLTModel(LightningModule):
         )
 
         decoded_output = self.tokenizer.batch_decode(output, skip_special_tokens=True)
-        reference = [[t] for t in text]
         self.bleu.update(decoded_output, reference)
         self.blue4.update(decoded_output, reference)
+
+        # for global token
+        output = self.mbart.generate(
+            encoder_outputs=BaseModelOutput(
+                # last_hidden_state=visual_feats,
+                last_hidden_state=visual_global_feats.unsqueeze(1),  # [B, 1, D]
+                hidden_states=None,
+                attentions=None,
+            ),
+            attention_mask=visual_attn_mask,  # [B, T]
+            forced_bos_token_id=self.tokenizer.lang_code_to_id[self.lang],
+            num_beams=4,
+            max_new_tokens=150,
+        )
+
+        decoded_output = self.tokenizer.batch_decode(output, skip_special_tokens=True)
+        self.blue4_global.update(decoded_output, reference)
+
         return output
 
     @staticmethod

@@ -14,6 +14,7 @@ from .video import (
 from .text import (
     RandomWordAugmentation,
     ExtendedPh14TTextAugmentation,
+    SaveOriginalText,
 )
 from .simsiam import (
     SimSiamTransformForTrain,
@@ -21,6 +22,7 @@ from .simsiam import (
 )
 
 __all__ = [
+    "SaveOriginalText",
     "JitteredUniformSampleVideo",
     "SimSiamTransformForTrain",
     "SimSiamTransformForEval",

@@ -22,6 +22,16 @@ class RandomWordAugmentation:
         return data
 
 
+class SaveOriginalText:
+    """
+    Save the original text in the data dictionary.
+    """
+
+    def __call__(self, data: dict) -> dict:
+        data["original_text"] = data["text"]
+        return data
+
+
 class ExtendedPh14TTextAugmentation:
     """
     Extended PH14T Text Augmentation with extended text data by DeekSeek API.

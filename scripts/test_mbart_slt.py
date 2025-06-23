@@ -1,6 +1,9 @@
 import sys
 import os
 import logging
+import click
+import typer
+from typing import Optional
 
 sys.path.append(
     os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -75,67 +78,17 @@ logger = logging.getLogger(__name__)
 logger.info(f"Output directory: {output_dir}")
 
 
-# NOTE: the hydra appp only inisitalize once
-@hydra.main(
-    config_path="../configs", config_name="slt_mbart_8a100", version_base="1.3.2"
-)
-def main(cfg: DictConfig) -> None:
-    train(cfg)
-
-
-def init_output_dir(config_name: str) -> str:
-    """
-    Initialize the output directory for the job.
-    """
-    now = datetime.datetime.now()
-    subfolder = now.strftime("%Y-%m-%d_%H-%M-%S")
-    output_dir = os.path.join("outputs", config_name, subfolder)
-    if not os.path.exists(output_dir):
-        os.makedirs(output_dir)
-    return output_dir
-
-
-def init_logger(local_rank, output_dir: str):
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-        handlers=[
-            logging.StreamHandler(),  # Stream handler for console output
-            logging.FileHandler(
-                os.path.join(output_dir, f"train_rank{local_rank}.log")
-            ),  # File handler for logging to a file
-        ],
-    )
-
-
-def train(
-    cfg: DictConfig,
+def main(
+    cfg: str = "outputs/slt_mbart_8a100/2025-06-22_16-48-04/config.yaml",
+    ckpt: str = "outputs/slt_mbart_8a100/2025-06-22_16-48-04/epoch=118-val_generate_bleu=0.3410-gajekce6.ckpt",
+    devices: list[int] = [0, 1],
+    precision: str = "bf16-mixed",
 ) -> None:
-    hydra_config = hydra.core.hydra_config.HydraConfig.get()
-    config_name = hydra_config.job.config_name
-
-    # NOTE: set the logger
-    wdb_config = OmegaConf.to_container(cfg, resolve=True)
-    wdb_config["output_dir"] = output_dir
-    lt_logger = WandbLogger(
-        name=config_name,
-        project="sign-langauge-translation-llm",
-        config=wdb_config,
-    )
-    run_id = str(lt_logger.experiment.id)
+    cfg = OmegaConf.load(cfg)
 
     # NOTE: define callbacks for trainer
     cbs = [
         callbacks.RichProgressBar(),
-        callbacks.LearningRateMonitor("step", log_momentum=True),
-        callbacks.ModelCheckpoint(
-            dirpath=output_dir,
-            filename="{epoch:02d}-{val_generate_bleu:.4f}-" + run_id,
-            monitor="val_generate_bleu",
-            mode="max",
-            save_last=True,
-            save_weights_only=True,
-        ),
         # DebugCallback(),
     ]
 
@@ -143,33 +96,23 @@ def train(
     t = Trainer(
         accelerator="gpu",
         strategy="ddp_find_unused_parameters_true",
-        devices=getattr(cfg, "devices", "auto"),
+        devices=devices,
         callbacks=cbs,
-        log_every_n_steps=cfg.log_interval,
-        max_epochs=cfg.max_epochs,
-        gradient_clip_val=1.0,  # NOTE: gradient clipping will be normed
+        # log_every_n_steps=cfg.log_interval,
+        # max_epochs=cfg.max_epochs,
+        # gradient_clip_val=1.0,  # NOTE: gradient clipping will be normed
         # gradient_clip_algorithm="value",
-        sync_batchnorm=True,
-        precision=cfg.precision,
-        logger=lt_logger,
+        # sync_batchnorm=True,
+        precision=precision,
         # WARN: will slow down the training process, just for debug now
         # detect_anomaly=True,
     )
 
-    if t.is_global_zero:
-        # NOTE: save git info
-        save_git_info(
-            repo_path=project_root,
-            info_path=os.path.join(output_dir, "git_info"),
-        )
-        # NOTE: save the config file
-        OmegaConf.save(cfg, os.path.join(output_dir, "config.yaml"))
-
     logger.info(f"Process in local rank {t.local_rank}, global rank {t.global_rank}")
 
     datamodule = instantiate(cfg.data.datamodule, cfg)
-    model = MBartSLTModel(cfg)
-    t.fit(model, datamodule=datamodule)
+    model = MBartSLTModel.load_from_checkpoint(ckpt, cfg=cfg, map_location="cpu")
+    t.validate(model, datamodule=datamodule)
 
 
 class DebugCallback(callbacks.Callback):
@@ -231,4 +174,4 @@ class DebugCallback(callbacks.Callback):
 
 
 if __name__ == "__main__":
-    main()
+    typer.run(main)  # type: ignore
