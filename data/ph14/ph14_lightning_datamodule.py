@@ -46,6 +46,12 @@ class Ph14TDataModule(LightningDataModule):
                 mode="test",
                 transforms=self.transforms_test,
             )
+        if stage == "val" or stage is None:
+            self.test_dataset = Ph14Dataset(
+                data_root=self.cfg.data.data_root,
+                mode="dev",
+                transforms=self.transforms_val,
+            )
 
     def train_dataloader(self):
         # Return the training dataloader
