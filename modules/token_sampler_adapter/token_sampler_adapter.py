@@ -58,7 +58,7 @@ class TokenSampleAdapter(nn.Module):
         self.mlp = build_mlp(
             mlp_depth, hidden_size * self.num_extra_queries, target_hidden_size
         )
-        self.positional_embedding = nn.Embedding(max_length, target_hidden_size)
+        # self.positional_embedding = nn.Embedding(max_length, target_hidden_size)
 
     def forward(self, x, v_length):
         # x: (B, T, HW, C)
@@ -73,16 +73,14 @@ class TokenSampleAdapter(nn.Module):
             extra_queries, "(b t) n c -> b t (n c)", b=B, t=T
         )  # (B, T, num_extra_queries * hidden_size)
 
-        position_ids = (
-            torch.arange(T, device=x.device).unsqueeze(0).expand(B, -1)
-        )  # (B, T)
-        position_embeddings = self.positional_embedding(
-            position_ids
-        )  # (B, T, Target_hidden_size)
+        # position_ids = (
+        #     torch.arange(T, device=x.device).unsqueeze(0).expand(B, -1)
+        # )  # (B, T)
+        # position_embeddings = self.positional_embedding(
+        #     position_ids
+        # )  # (B, T, Target_hidden_size)
 
-        feats = (
-            self.mlp(extra_queries) + position_embeddings
-        )  # (B, T, Target_hidden_size)
+        feats = self.mlp(extra_queries)  # (B, T, Target_hidden_size)
 
         return feats, v_length
 

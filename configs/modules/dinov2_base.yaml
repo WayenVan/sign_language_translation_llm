@@ -19,3 +19,9 @@ visual_adapter:
 
 visual_encoder_layer_scale: 1
 connector_depth: 1
+
+visual_codebook_size: 1024
+visual_codebook_dim: 512
+
+shared_codebook_size: 4096
+shared_codebook_dim: 512

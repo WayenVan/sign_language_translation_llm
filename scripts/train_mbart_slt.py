@@ -18,7 +18,8 @@ import torch
 
 # from model.slt_vision_pretrain import SignBackboneForVPretraining
 # from model.t5_text_pretrain import ModelForT5TextPretrain
-from model.mbart_slt import MBartSLTModel
+# from model.mbart_slt import MBartSLTModel
+from model.quantize_slt import MBartQuantizedSLTModel
 import cv2
 
 import datetime
@@ -77,7 +78,7 @@ logger.info(f"Output directory: {output_dir}")
 
 # NOTE: the hydra appp only inisitalize once
 @hydra.main(
-    config_path="../configs", config_name="slt_mbart_8a100", version_base="1.3.2"
+    config_path="../configs", config_name="slt_quantized_8a100", version_base="1.3.2"
 )
 def main(cfg: DictConfig) -> None:
     train(cfg)
@@ -168,7 +169,7 @@ def train(
     logger.info(f"Process in local rank {t.local_rank}, global rank {t.global_rank}")
 
     datamodule = instantiate(cfg.data.datamodule, cfg)
-    model = MBartSLTModel(cfg)
+    model = MBartQuantizedSLTModel(cfg)
     t.fit(model, datamodule=datamodule)
 
 

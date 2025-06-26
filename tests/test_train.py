@@ -18,6 +18,7 @@ import torch
 
 from model import SLTModelForT5FineTune, ModelForT5TextPretrain
 from model.mbart_slt import MBartSLTModel
+from model.quantize_slt import MBartQuantizedSLTModel
 
 import cv2
 
@@ -38,7 +39,7 @@ global_rank = int(os.environ.get("RANK", "0"))
     # config_path="../configs", config_name="t5_text_pretrain_8a100", version_base="1.3.2"
     config_path="../configs",
     # config_name="slt_finetune_8a100",
-    config_name="slt_mbart_8a100",
+    config_name="slt_quantized_8a100",
     version_base="1.3.2",
 )
 def main(cfg: DictConfig) -> None:
@@ -102,7 +103,7 @@ def train(
     t = Trainer(
         accelerator="gpu",
         strategy="ddp_find_unused_parameters_true",
-        devices=[2],
+        devices=[0],
         callbacks=cbs,
         log_every_n_steps=50,
         max_epochs=cfg.max_epochs,
@@ -130,7 +131,8 @@ def train(
     #     "outputs/t5_text_pretrain_8a100/2025-06-18_19-56-11/epoch=79-val_generate_bleu=0.5015-blo6e98y.ckpt"
     # )
     # model = SLTModelForT5FineTune.load_from_checkpoint(cfg.ckpt, cfg=cfg)
-    model = MBartSLTModel(cfg=cfg)
+    # model = MBartSLTModel(cfg=cfg)
+    model = MBartQuantizedSLTModel(cfg=cfg)
     t.fit(model, datamodule=datamodule)
 
 

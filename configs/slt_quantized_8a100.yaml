@@ -1,5 +1,5 @@
 defaults:
-  - base_slt_mbart
+  - base_slt_quantized
   # - override modules: dinov2_base_tconv
   - override modules: dinov2_base
   # - override modules: vitpose_base
@@ -28,11 +28,7 @@ engine:
       eta_min: 1e-8
 
 visual_text_alignment_weight: 4.0
-# earth_mover_loss_weight: 1.0
-# earth_mover_blur: 0.05
 log_interval: 10
-
-sign_cl_layer: 2
 
 modules:
   visual_encoder_layer_scale: 1
